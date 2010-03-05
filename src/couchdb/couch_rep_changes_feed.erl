@@ -59,8 +59,7 @@ init([_Parent, #http_db{}=Source, Since, PostProps] = Args) ->
         qs = [{style, all_docs}, {heartbeat, 10000}, {since, Since},
             {feed, Feed}],
         conn = Pid,
-        options = [{stream_to, {self(), once}}, {response_format, binary},
-            {inactivity_timeout, 31000}], % miss 3 heartbeats, assume death
+        options = [{stream_to, {self(), once}}, {response_format, binary}],
         headers = Source#http_db.headers -- [{"Accept-Encoding", "gzip"}]
     },
     {ibrowse_req_id, ReqId} = couch_rep_httpc:request(Req),
@@ -143,6 +142,9 @@ handle_info({'EXIT', From, normal}, #state{changes_loop=From} = State) ->
 handle_info({'EXIT', From, Reason}, #state{changes_loop=From} = State) ->
     ?LOG_ERROR("changes_loop died with reason ~p", [Reason]),
     {stop, changes_loop_died, State};
+
+handle_info({'EXIT', From, normal}, State) ->
+    {noreply, State};
 
 handle_info(Msg, State) ->
     ?LOG_DEBUG("unexpected message at changes_feed ~p", [Msg]),
@@ -323,9 +325,12 @@ local_update_notification(_, _, _) ->
 maybe_stream_next(#state{reqid=nil}) ->
     ok;
 maybe_stream_next(#state{complete=false, count=N} = S) when N < ?BUFFER_SIZE ->
+    timer:cancel(get(timeout)),
+    {ok, Timeout} = timer:exit_after(31000, changes_timeout),
+    put(timeout, Timeout),
     ibrowse:stream_next(S#state.reqid);
 maybe_stream_next(_) ->
-    ok.
+    timer:cancel(get(timeout)).
 
 send_local_changes_forever(Server, Db, Since) ->
     #db{name = DbName, user_ctx = UserCtx} = Db,

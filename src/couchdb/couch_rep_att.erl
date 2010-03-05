@@ -34,6 +34,8 @@ cleanup() ->
         %% TODO maybe log, didn't expect to have data here
         cleanup();
     {ibrowse_async_response_end, _} -> 
+        cleanup();
+    {ibrowse_async_headers, _, _, _} ->
         cleanup()
     after 0 ->
         erase(),
@@ -43,13 +45,27 @@ cleanup() ->
 % internal funs
 
 attachment_receiver(Ref, Request) ->
-    case get(Ref) of
+    try case get(Ref) of
     undefined ->
         ReqId = start_http_request(Request),
         put(Ref, ReqId),
         receive_data(Ref, ReqId);
     ReqId ->
         receive_data(Ref, ReqId)
+    end
+    catch
+    throw:{attachment_request_failed, timeout} ->
+        case {Request#http_db.retries, Request#http_db.pause} of
+        {0, _} ->
+             ?LOG_INFO("request for ~p failed", [Request#http_db.resource]),
+             throw({attachment_request_failed, max_retries_reached});
+        {N, Pause} when N > 0 ->
+            ?LOG_INFO("request for ~p timed out, retrying in ~p seconds",
+                [Request#http_db.resource, Pause/1000]),
+            timer:sleep(Pause),
+            cleanup(),
+            attachment_receiver(Ref, Request#http_db{retries = N-1})
+        end
     end.
 
 receive_data(Ref, ReqId) ->
@@ -67,6 +83,8 @@ receive_data(Ref, ReqId) ->
     {ibrowse_async_response_end, ReqId} ->
         ?LOG_ERROR("streaming att. ended but more data requested ~p", [ReqId]),
         throw({attachment_request_failed, premature_end})
+    after 31000 ->
+        throw({attachment_request_failed, timeout})
     end.
 
 start_http_request(Req) ->
@@ -80,6 +98,8 @@ start_http_request(Req) ->
         {ok, NewReqId} ->
             NewReqId
         end
+    after 10000 ->
+        throw({attachment_request_failed, timeout})
     end.
 
 validate_headers(_Req, 200, _Headers) ->
