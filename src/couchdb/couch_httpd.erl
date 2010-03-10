@@ -33,6 +33,7 @@ start_link() ->
 
     BindAddress = couch_config:get("httpd", "bind_address", any),
     Port = couch_config:get("httpd", "port", "5984"),
+    MaxConnections = couch_config:get("httpd", "max_connections", 2048),
 
     DefaultSpec = "{couch_httpd_db, handle_request}",
     DefaultFun = make_arity_1_fun(
@@ -69,7 +70,8 @@ start_link() ->
         {loop, Loop},
         {name, ?MODULE},
         {ip, BindAddress},
-        {port, Port}
+        {port, Port},
+        {max, MaxConnections}
     ]) of
     {ok, MochiPid} -> {ok, MochiPid};
     {error, Reason} ->
