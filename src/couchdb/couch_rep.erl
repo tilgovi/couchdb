@@ -322,6 +322,27 @@ dbinfo(Db) ->
     {ok, Info} = couch_db:get_db_info(Db),
     Info.
 
+do_restart(State) ->
+    #state{
+        changes_feed = CF,
+        missing_revs = MR,
+        reader = Reader,
+        writer = Writer,
+        source = Source,
+        target = Target
+    } = State,
+    ?LOG_INFO("rebooting ~s -> ~s from last known replication checkpoint",
+              [dbname(Source), dbname(Target)]),
+    Pids = [Writer, Reader, MR, CF],
+    [unlink(Pid) || Pid <- Pids],
+    [exit(Pid, shutdown) || Pid <- Pids],
+    close_db(Target),
+    close_db(Source),
+    {ok, NewState} = init(State#state.init_args),
+    % keep old stats table
+    ets:delete(NewState#state.stats),
+    NewState#state{listeners=State#state.listeners, stats=State#state.stats}.
+
 do_terminate(State) ->
     #state{
         checkpoint_history = CheckpointHistory,
@@ -474,12 +495,12 @@ do_checkpoint(State) ->
         target = Target,
         committed_seq = NewSeqNum,
         start_seq = StartSeqNum,
-        history = OldHistory,
         source_log = SourceLog,
         target_log = TargetLog,
         rep_starttime = ReplicationStartTime,
         src_starttime = SrcInstanceStartTime,
         tgt_starttime = TgtInstanceStartTime,
+        checkpoint_history = CheckpointHistory,
         stats = Stats
     } = State,
     case commit_to_both(Source, Target, NewSeqNum) of
@@ -487,6 +508,10 @@ do_checkpoint(State) ->
         ?LOG_INFO("recording a checkpoint for ~s -> ~s at source update_seq ~p",
             [dbname(Source), dbname(Target), NewSeqNum]),
         SessionId = couch_util:new_uuid(),
+        OldHistory = case CheckpointHistory of
+        nil -> State#state.history;
+        {OldLog} -> proplists:get_value(<<"history">>, OldLog)
+        end,
         NewHistoryEntry = {[
             {<<"session_id">>, SessionId},
             {<<"start_time">>, list_to_binary(ReplicationStartTime)},
@@ -501,11 +526,11 @@ do_checkpoint(State) ->
             {<<"doc_write_failures">>, 
                 ets:lookup_element(Stats, doc_write_failures, 2)}
         ]},
-        % limit history to 50 entries
+        % limit history to 5 entries
         NewRepHistory = {[
             {<<"session_id">>, SessionId},
             {<<"source_last_seq">>, NewSeqNum},
-            {<<"history">>, lists:sublist([NewHistoryEntry | OldHistory], 50)}
+            {<<"history">>, lists:sublist([NewHistoryEntry | OldHistory], 5)}
         ]},
 
         try
@@ -522,24 +547,10 @@ do_checkpoint(State) ->
         catch throw:conflict ->
         ?LOG_ERROR("checkpoint failure: conflict (are you replicating to "
             "yourself?)", []),
-        State
+        do_restart(State)
         end;
     _Else ->
-        ?LOG_INFO("rebooting ~s -> ~s from last known replication checkpoint",
-            [dbname(Source), dbname(Target)]),
-        #state{
-            changes_feed = CF,
-            missing_revs = MR,
-            reader = Reader,
-            writer = Writer
-        } = State,
-        Pids = [Writer, Reader, MR, CF],
-        [unlink(Pid) || Pid <- Pids],
-        [exit(Pid, shutdown) || Pid <- Pids],
-        close_db(Target),
-        close_db(Source),
-        {ok, NewState} = init(State#state.init_args),
-        NewState
+        do_restart(State)
     end.
 
 commit_to_both(Source, Target, RequiredSeq) ->
