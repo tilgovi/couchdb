@@ -551,7 +551,7 @@ do_checkpoint(State) ->
         end;
     _Else ->
         do_restart(State)
-   end.
+    end.
 
 commit_to_both(Source, Target, RequiredSeq) ->
     % commit the src async
