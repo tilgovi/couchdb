@@ -57,9 +57,9 @@ attachment_receiver(Ref, Request) ->
     throw:{attachment_request_failed, Err} ->
         case {Request#http_db.retries, Request#http_db.pause} of
         {0, _} ->
-             ?LOG_INFO("request for ~p failed with reason ~p",
-                 [Request#http_db.resource, Err]),
-             throw({attachment_request_failed, max_retries_reached});
+            ?LOG_INFO("request for ~p failed with reason ~p",
+                [Request#http_db.resource, Err]),
+            throw({attachment_request_failed, max_retries_reached});
         {N, Pause} when N > 0 ->
             ?LOG_INFO("request for ~p failed with reason ~p, "
                 "retrying in ~p seconds",
@@ -85,7 +85,7 @@ receive_data(Ref, ReqId) ->
     {ibrowse_async_response_end, ReqId} ->
         ?LOG_ERROR("streaming att. ended but more data requested ~p", [ReqId]),
         throw({attachment_request_failed, premature_end})
-     end.
+    end.
 
 start_http_request(Req) ->
     %% set stream_to here because self() has changed
