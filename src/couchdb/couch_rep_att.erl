@@ -54,17 +54,19 @@ attachment_receiver(Ref, Request) ->
         receive_data(Ref, ReqId)
     end
     catch
-    throw:{attachment_request_failed, timeout} ->
+    throw:{attachment_request_failed, Err} ->
         case {Request#http_db.retries, Request#http_db.pause} of
         {0, _} ->
-             ?LOG_INFO("request for ~p failed", [Request#http_db.resource]),
+             ?LOG_INFO("request for ~p failed with reason ~p",
+                 [Request#http_db.resource, Err]),
              throw({attachment_request_failed, max_retries_reached});
         {N, Pause} when N > 0 ->
-            ?LOG_INFO("request for ~p timed out, retrying in ~p seconds",
-                [Request#http_db.resource, Pause/1000]),
+            ?LOG_INFO("request for ~p failed with reason ~p, "
+                "retrying in ~p seconds",
+                [Request#http_db.resource, Err, Pause/1000]),
             timer:sleep(Pause),
             cleanup(),
-            attachment_receiver(Ref, Request#http_db{retries = N-1})
+            attachment_receiver(Ref, Request#http_db{retries = N-1, pause = 2*Pause})
         end
     end.
 
@@ -83,23 +85,22 @@ receive_data(Ref, ReqId) ->
     {ibrowse_async_response_end, ReqId} ->
         ?LOG_ERROR("streaming att. ended but more data requested ~p", [ReqId]),
         throw({attachment_request_failed, premature_end})
-    after 31000 ->
-        throw({attachment_request_failed, timeout})
-    end.
+     end.
 
 start_http_request(Req) ->
     %% set stream_to here because self() has changed
     Req2 = Req#http_db{options = [{stream_to,self()} | Req#http_db.options]},
     {ibrowse_req_id, ReqId} = couch_rep_httpc:request(Req2),
-    receive {ibrowse_async_headers, ReqId, Code, Headers} ->
+    receive
+    {ibrowse_async_headers, ReqId, Code, Headers} ->
         case validate_headers(Req2, list_to_integer(Code), Headers) of
         ok ->
             ReqId;
         {ok, NewReqId} ->
             NewReqId
-        end
-    after 10000 ->
-        throw({attachment_request_failed, timeout})
+        end;
+    {ibrowse_async_response, ReqId, {error, Err}} ->
+        throw({attachment_request_failed, Err})
     end.
 
 validate_headers(_Req, 200, _Headers) ->
