@@ -84,6 +84,8 @@ start_link() ->
             ?MODULE:stop();
         ("httpd", "port") ->
             ?MODULE:stop();
+        ("httpd", "max_connections") ->
+            ?MODULE:stop();
         ("httpd", "default_handler") ->
             ?MODULE:stop();
         ("httpd_global_handlers", _) ->
