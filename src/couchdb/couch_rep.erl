@@ -574,8 +574,7 @@ commit_to_both(Source, Target, RequiredSeq) ->
 ensure_full_commit(#http_db{} = Target) ->
     Req = Target#http_db{
         resource = "_ensure_full_commit",
-        method = post,
-        body = true
+        method = post
     },
     {ResultProps} = couch_rep_httpc:request(Req),
     true = proplists:get_value(<<"ok">>, ResultProps),
@@ -600,7 +599,6 @@ ensure_full_commit(#http_db{} = Source, RequiredSeq) ->
     Req = Source#http_db{
         resource = "_ensure_full_commit",
         method = post,
-        body = true,
         qs = [{seq, RequiredSeq}]
     },
     {ResultProps} = couch_rep_httpc:request(Req),
