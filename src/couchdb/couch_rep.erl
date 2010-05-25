@@ -547,7 +547,7 @@ do_checkpoint(State) ->
         catch throw:conflict ->
         ?LOG_ERROR("checkpoint failure: conflict (are you replicating to "
             "yourself?)", []),
-        do_restart(State)
+        State
         end;
     _Else ->
         do_restart(State)
