@@ -526,11 +526,11 @@ do_checkpoint(State) ->
             {<<"doc_write_failures">>, 
                 ets:lookup_element(Stats, doc_write_failures, 2)}
         ]},
-        % limit history to 5 entries
+        % limit history to 50 entries
         NewRepHistory = {[
             {<<"session_id">>, SessionId},
             {<<"source_last_seq">>, NewSeqNum},
-            {<<"history">>, lists:sublist([NewHistoryEntry | OldHistory], 5)}
+            {<<"history">>, lists:sublist([NewHistoryEntry | OldHistory], 50)}
         ]},
 
         try
