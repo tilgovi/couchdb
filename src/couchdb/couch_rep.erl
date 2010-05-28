@@ -164,7 +164,13 @@ handle_call(get_result, From, State) ->
     {noreply, State#state{listeners=[From|Listeners]}}.
 
 handle_cast(do_checkpoint, State) ->
-    {noreply, do_checkpoint(State)};
+    try
+    {noreply, do_checkpoint(State)}
+    catch throw:conflict ->
+    ?LOG_ERROR("checkpoint failure: conflict (are you replicating to "
+            "yourself?)", []),
+    {stop, {checkpoint_failure, conflict}}
+    end;
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -533,7 +539,6 @@ do_checkpoint(State) ->
             {<<"history">>, lists:sublist([NewHistoryEntry | OldHistory], 50)}
         ]},
 
-        try
         {SrcRevPos,SrcRevId} =
             update_local_doc(Source, SourceLog#doc{body=NewRepHistory}),
         {TgtRevPos,TgtRevId} =
@@ -543,12 +548,7 @@ do_checkpoint(State) ->
             checkpoint_history = NewRepHistory,
             source_log = SourceLog#doc{revs={SrcRevPos, [SrcRevId]}},
             target_log = TargetLog#doc{revs={TgtRevPos, [TgtRevId]}}
-        }
-        catch throw:conflict ->
-        ?LOG_ERROR("checkpoint failure: conflict (are you replicating to "
-            "yourself?)", []),
-        State
-        end;
+        };
     _Else ->
         do_restart(State)
     end.
