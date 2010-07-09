@@ -366,12 +366,21 @@ refresh_validate_doc_funs(Db) ->
 
 % rev tree functions
 
-flush_trees(_Db, [], AccFlushedTrees) ->
-    {ok, lists:reverse(AccFlushedTrees)};
+collect_flush_results([], AccById, AccBySeq) ->
+    {ok, AccById, AccBySeq};
+collect_flush_results([FlushPid|Rest], AccById, AccBySeq) ->
+    receive
+    {FlushPid, FullInfo, Info} ->
+        collect_flush_results(Rest, [FullInfo|AccById], [Info|AccBySeq])
+    end.
+
+flush_trees(_Db, [], FlushPidAcc) ->
+    collect_flush_results(FlushPidAcc, [], []);
 flush_trees(#db{fd=Fd,header=Header}=Db,
-        [InfoUnflushed | RestUnflushed], AccFlushed) ->
+        [InfoUnflushed | RestUnflushed], FlushPidAcc) ->
     #full_doc_info{update_seq=UpdateSeq, rev_tree=Unflushed} = InfoUnflushed,
-    Flushed = couch_key_tree:map(
+    Parent = self(),
+    FlushPid = spawn_link(fun() -> Flushed = couch_key_tree:map(
         fun(_Rev, Value) ->
             case Value of
             #doc{atts=Atts,deleted=IsDeleted}=Doc ->
@@ -406,7 +415,11 @@ flush_trees(#db{fd=Fd,header=Header}=Db,
                 Value
             end
         end, Unflushed),
-    flush_trees(Db, RestUnflushed, [InfoUnflushed#full_doc_info{rev_tree=Flushed} | AccFlushed]).
+        {[FullInfo], [Info]} = new_index_entries(
+            [InfoUnflushed#full_doc_info{rev_tree=Flushed}], [], []),
+        Parent ! {self(), FullInfo, Info}
+    end),
+    flush_trees(Db, RestUnflushed, [FlushPid|FlushPidAcc]).
 
 merge_rev_trees(_MergeConflicts, [], [], AccNewInfos, AccRemoveSeqs, AccConflicts, AccSeq) ->
     {ok, lists:reverse(AccNewInfos), AccRemoveSeqs, AccConflicts, AccSeq};
@@ -512,14 +525,23 @@ update_docs_int(Db, DocsList, NonRepDocs, Options) ->
 
     % Write out the document summaries (the bodies are stored in the nodes of
     % the trees, the attachments are already written to disk)
-    {ok, FlushedFullDocInfos} = flush_trees(Db2, NewFullDocInfos, []),
-
-    {IndexFullDocInfos, IndexDocInfos} =
-            new_index_entries(FlushedFullDocInfos, [], []),
+    {ok, IndexFullDocInfos, IndexDocInfos} =
+            flush_trees(Db2, NewFullDocInfos, []),
 
     % and the indexes
-    {ok, DocInfoByIdBTree2} = couch_btree:add_remove(DocInfoByIdBTree, IndexFullDocInfos, []),
-    {ok, DocInfoBySeqBTree2} = couch_btree:add_remove(DocInfoBySeqBTree, IndexDocInfos, RemoveSeqs),
+    %% {ok, DocInfoByIdBTree2} = couch_btree:add_remove(DocInfoByIdBTree, IndexFullDocInfos, []),
+    %% {ok, DocInfoBySeqBTree2} = couch_btree:add_remove(DocInfoBySeqBTree, IndexDocInfos, RemoveSeqs),
+    Parent = self(),
+    [DocInfoByIdBTree2, DocInfoBySeqBTree2] =
+    [receive {Pid, Result} -> Result end
+     || Pid <-
+            [spawn_link(fun() ->
+                {ok, BTree2} = couch_btree:add_remove(BTree, Update, Remove),
+                Parent ! {self(), BTree2}
+                end)
+             || {BTree, Update, Remove} <-
+                    [{DocInfoByIdBTree, IndexFullDocInfos, []},
+                     {DocInfoBySeqBTree, IndexDocInfos, RemoveSeqs}]]],
 
     Db3 = Db2#db{
         fulldocinfo_by_id_btree = DocInfoByIdBTree2,
