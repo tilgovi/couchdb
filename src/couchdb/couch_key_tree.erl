@@ -13,7 +13,7 @@
 -module(couch_key_tree).
 
 -export([merge/2, find_missing/2, get_key_leafs/2, get_full_key_paths/2, get/2]).
--export([map/2, get_all_leafs/1, count_leafs/1, remove_leafs/2,
+-export([map/2, foldl/3, mapfoldl/3, get_all_leafs/1, count_leafs/1, remove_leafs/2,
     get_all_leafs_full/1,stem/2,map_leafs/2]).
 
 % a key tree looks like this:
@@ -294,6 +294,33 @@ map_simple(Fun, Pos, [{Key, Value, SubTree} | RestTree]) ->
             if SubTree == [] -> leaf; true -> branch end),
     [{Key, Value2, map_simple(Fun, Pos + 1, SubTree)} | map_simple(Fun, Pos, RestTree)].
 
+foldl(_Fun, Acc, []) ->
+    Acc;
+foldl(Fun, Acc, [{Pos, Tree}|Rest]) ->
+    Acc2 = foldl_simple(Fun, Acc, Pos, [Tree]),
+    foldl(Fun, Acc2, Rest).
+
+foldl_simple(_Fun, Acc, _Pos, []) ->
+    Acc;
+foldl_simple(Fun, Acc, Pos, [{Key, Value, SubTree} | RestTree]) ->
+    Acc2 = Fun({Pos, Key}, Value, Acc),
+    Acc3 = foldl_simple(Fun, Acc2, Pos + 1, SubTree),
+    foldl_simple(Fun, Acc3, Pos, RestTree).
+
+mapfoldl(_Fun, Acc, []) ->
+    {[], Acc};
+mapfoldl(Fun, Acc, [{Pos, Tree}|Rest]) ->
+    {[NewTree], Acc2} = mapfoldl_simple(Fun, Acc, Pos, [Tree]),
+    {NewRest, Acc3} = mapfoldl(Fun, Acc2, Rest),
+    {[{Pos, NewTree} | NewRest], Acc3}.
+
+mapfoldl_simple(_Fun, Acc, _Pos, []) ->
+    {[], Acc};
+mapfoldl_simple(Fun, Acc, Pos, [{Key, Value, Subtree} | RestTree ]) ->
+    {Value2, Acc2} = Fun({Pos, Key}, Value, Acc),
+    {NewSubTree, Acc3} = mapfoldl_simple(Fun, Acc2, Pos, Subtree),
+    {NewRestTree, Acc4} = mapfoldl_simple(Fun, Acc3, Pos, RestTree),
+    {[{Key, Value2, NewSubTree} | NewRestTree], Acc4}.
 
 map_leafs(_Fun, []) ->
     [];
