@@ -439,15 +439,42 @@ refresh_validate_doc_funs(Db) ->
 
 % rev tree functions
 
-flush_trees(_Db, [], AccFlushedTrees) ->
-    {ok, lists:reverse(AccFlushedTrees)};
-flush_trees(#db{fd=Fd,header=Header}=Db,
-        [InfoUnflushed | RestUnflushed], AccFlushed) ->
-    #full_doc_info{update_seq=UpdateSeq, rev_tree=Unflushed} = InfoUnflushed,
-    Flushed = couch_key_tree:map(
-        fun(_Rev, Value) ->
+flush_trees(_Db, [], AccDocInfo, []) ->
+    {ok, lists:reverse(AccDocInfo)};
+flush_trees(#db{fd=Fd,header=Header}, [], AccDocInfo, AccUnflushed) ->
+    {ok, NewSummaryPointers} =
+    case Header#db_header.disk_version < 4 of
+    true ->
+        couch_file:append_terms(Fd, AccUnflushed);
+    false ->
+        couch_file:append_terms_md5(Fd, AccUnflushed)
+    end,
+    {Flushed, []} =
+    lists:foldl(
+        fun(#full_doc_info{update_seq=UpdateSeq, rev_tree=RevTree}=DocInfo,
+                {FlushedInfoAcc, UnusedSummaryPointers}) ->
+            {FlushedRevTree, UnusedSummaryPointers2} =
+            couch_key_tree:mapfoldl(
+                fun(_Rev, Value, SummaryPointers) ->
+                    case Value of
+                    #doc{deleted=IsDeleted} ->
+                        [NewSummaryPointer|Rest] = SummaryPointers,
+                        {{IsDeleted, NewSummaryPointer, UpdateSeq}, Rest};
+                    _ ->
+                        {Value, SummaryPointers}
+                    end
+                end, UnusedSummaryPointers, RevTree),
+            {[DocInfo#full_doc_info{rev_tree=FlushedRevTree}|FlushedInfoAcc],
+                UnusedSummaryPointers2}
+        end, {[], NewSummaryPointers}, AccDocInfo),
+    {ok, Flushed};
+flush_trees(#db{fd=Fd}=Db, [InfoUnflushed | RestUnflushed],
+        AccDocInfo, AccUnflushed) ->
+    #full_doc_info{rev_tree=RevTree} = InfoUnflushed,
+    AccUnflushed2 = couch_key_tree:foldl(
+        fun(_Rev, Value, Acc) ->
             case Value of
-            #doc{atts=Atts,deleted=IsDeleted}=Doc ->
+            #doc{atts=Atts}=Doc ->
                 % this node value is actually an unwritten document summary,
                 % write to disk.
                 % make sure the Fd in the written bins is the same Fd we are
@@ -468,20 +495,13 @@ flush_trees(#db{fd=Fd,header=Header}=Db,
                             " changed. Possibly retrying.", []),
                     throw(retry)
                 end,
-                {ok, NewSummaryPointer} =
-                case Header#db_header.disk_version < 4 of
-                true ->
-                    couch_file:append_term(Fd, {Doc#doc.body, DiskAtts});
-                false ->
-                    couch_file:append_term_md5(Fd, {Doc#doc.body, DiskAtts})
-                end,
-                {IsDeleted, NewSummaryPointer, UpdateSeq};
+                UnflushedBody = {Doc#doc.body, DiskAtts},
+                [UnflushedBody|Acc];
             _ ->
-                Value
+                Acc
             end
-        end, Unflushed),
-    flush_trees(Db, RestUnflushed, [InfoUnflushed#full_doc_info{rev_tree=Flushed} | AccFlushed]).
-
+        end, AccUnflushed, RevTree),
+    flush_trees(Db, RestUnflushed, [InfoUnflushed | AccDocInfo], AccUnflushed2).
 
 send_result(Client, Id, OriginalRevs, NewResult) ->
     % used to send a result to the client
@@ -605,7 +625,7 @@ update_docs_int(Db, DocsList, NonRepDocs, MergeConflicts, FullCommit) ->
 
     % Write out the document summaries (the bodies are stored in the nodes of
     % the trees, the attachments are already written to disk)
-    {ok, FlushedFullDocInfos} = flush_trees(Db2, NewFullDocInfos, []),
+    {ok, FlushedFullDocInfos} = flush_trees(Db2, NewFullDocInfos, [], []),
 
     {IndexFullDocInfos, IndexDocInfos} =
             new_index_entries(FlushedFullDocInfos, [], []),
