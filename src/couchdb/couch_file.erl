@@ -27,6 +27,8 @@
 -export([append_term/2, pread_term/2, pread_iolist/2, write_header/2]).
 -export([pread_binary/2, read_header/1, truncate/2, upgrade_old_header/2]).
 -export([append_term_md5/2,append_binary_md5/2]).
+-export([append_terms/2, append_terms_md5/2]).
+-export([append_binaries/2, append_binaries_md5/2]).
 -export([init/1, terminate/2, handle_call/3, handle_cast/2, code_change/3, handle_info/2]).
 -export([delete/2,delete/3,init_delete_dir/1]).
 
@@ -74,6 +76,11 @@ append_term(Fd, Term) ->
 append_term_md5(Fd, Term) ->
     append_binary_md5(Fd, term_to_binary(Term)).
 
+append_terms(Fd, Terms) ->
+    append_terms(Fd, lists:map(fun term_to_binary/1, Terms)).
+
+append_terms_md5(Fd, Terms) ->
+    append_binaries_md5(Fd, lists:map(fun term_to_binary/1, Terms)).
 
 %%----------------------------------------------------------------------
 %% Purpose: To append an Erlang binary to the end of the file.
@@ -92,6 +99,22 @@ append_binary_md5(Fd, Bin) ->
     Size = iolist_size(Bin),
     gen_server:call(Fd, {append_bin,
             [<<1:1/integer,Size:31/integer>>, couch_util:md5(Bin), Bin]}, infinity).
+
+append_binaries(Fd, Bins) ->
+    gen_server:call(Fd, {append_bins,
+            lists:map(
+                fun(Bin) ->
+                    Size = iolist_size(Bin),
+                    [<<0:1/integer,Size:31/integer>>, Bin]
+                end, Bins)}, infinity).
+
+append_binaries_md5(Fd, Bins) ->
+    gen_server:call(Fd, {append_bins,
+            lists:map(
+                fun(Bin) ->
+                    Size = iolist_size(Bin),
+                    [<<1:1/integer,Size:31/integer>>, couch_util:md5(Bin), Bin]
+                end, Bins)}, infinity).
 
 
 %%----------------------------------------------------------------------
@@ -328,6 +351,19 @@ handle_call({append_bin, Bin}, _From, #file{fd=Fd, eof=Pos}=File) ->
     case file:write(Fd, Blocks) of
     ok ->
         {reply, {ok, Pos}, File#file{eof=Pos+iolist_size(Blocks)}};
+    Error ->
+        {reply, Error, File}
+    end;
+handle_call({append_bins, Bins}, _From, #file{fd=Fd, eof=Pos}=File) ->
+    {BlockPosList, NewPos} = lists:mapfoldl(
+        fun(Bin, OutPos) ->
+            Blocks = make_blocks(OutPos rem ?SIZE_BLOCK, Bin),
+            {{Blocks, OutPos}, OutPos+iolist_size(Blocks)}
+        end, Pos, Bins),
+    {BlockList, PosList} = lists:unzip(BlockPosList),
+    case file:write(Fd, BlockList) of
+    ok ->
+        {reply, {ok, PosList}, File#file{eof=NewPos}};
     Error ->
         {reply, Error, File}
     end;
