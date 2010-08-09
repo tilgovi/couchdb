@@ -13,7 +13,7 @@
 -module(couch_db_repair).
 
 -compile(export_all).
--export([repair/1]).
+-export([repair/1, merge_to_file/2]).
 
 -include("couch_db.hrl").
 
@@ -130,3 +130,28 @@ key_type(K) when is_integer(K) ->
 key_type(K) when is_binary(K) ->
     binary.
 
+merge_to_file(Db, TargetName) ->
+    case couch_db:open(TargetName, []) of
+    {ok, TargetDb0} ->
+        ok;
+    {not_found, no_db_file} ->
+        {ok, TargetDb0} = couch_db:create(TargetName, [])
+    end,
+    TargetDb = TargetDb0#db{fsync_options = [before_header]},
+
+    {ok, _, {_, FinalDocs}} =
+    couch_btree:fold(Db#db.docinfo_by_seq_btree, fun(DocInfo, _, {I, Acc}) ->
+        #doc_info{id=Id, revs = RevsInfo} = DocInfo,
+        LeafRevs = [Rev || #rev_info{rev=Rev} <- RevsInfo],
+        {ok, Docs} = couch_db:open_doc_revs(Db, Id, LeafRevs, [latest]),
+        if I > 1000 ->
+            couch_db:update_docs(TargetDb, [Doc || {ok, Doc} <- Acc],
+                [full_commit], replicated_changes),
+            {ok, {length(Docs), Docs}};
+        true ->
+            {ok, {I+length(Docs), Docs ++ Acc}}
+        end
+    end, {0, []}, []),
+    couch_db:update_docs(TargetDb, [Doc || {ok, Doc} <- FinalDocs],
+        [full_commit], replicated_changes),
+    couch_db:close(TargetDb).
