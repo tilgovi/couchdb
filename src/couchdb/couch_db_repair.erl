@@ -24,45 +24,63 @@ repair(DbName) ->
     {ok, Fd} = couch_file:open(FullPath, []),
     Ret = maybe_add_missing_header(Fd),
     couch_file:close(Fd),
+    % TODO: log if return value matches {ok, repaired, _BTreeInfos}
     Ret.
 
 
 maybe_add_missing_header(Fd) ->
     case couch_file:read_header(Fd, [return_pos]) of
     no_valid_header ->
-        no_header; % ignore?
+        no_header; % TODO: ignore?
     {ok, Header, HeaderPos} ->
         case find_last_btree_root(Fd) of
         {nil, _} ->
             ok;
-        {_Root, NodePos, TreeType, LastKey} when NodePos > HeaderPos ->
-            {_Root2, NodePos2, Tree2Type, LastKey2} =
-                find_last_btree_root(Fd, NodePos - 1),
-            {btree_infos,
-                sort_btree_infos(
-                    {TreeType, NodePos, LastKey},
-                    {Tree2Type, NodePos2, LastKey2}
-                )
-            };
+        {_, NodePos, _, _} = Root1Info when NodePos > HeaderPos ->
+            Root2Info = find_last_btree_root(Fd, NodePos - 1),
+            add_missing_header(
+                Fd, Header,
+                sort_btree_infos(Root1Info, Root2Info)
+            );
         _ ->
             ok
         end
      end.
 
-sort_btree_infos({BTree1Type, Root1Pos, LastKey1}, {BTree2Type, Root2Pos, LastKey2}) ->
+
+sort_btree_infos({Root1Node, Root1Pos, BTree1Type, LastKey1},
+    {Root2Node, Root2Pos, BTree2Type, LastKey2}) ->
     case {BTree1Type, BTree2Type} of
     {by_seq, by_id} ->
-        {by_seq, LastKey1, Root1Pos, by_id, LastKey2, Root2Pos};
+        {by_seq, LastKey1, Root1Pos, Root1Node,
+            by_id, LastKey2, Root2Pos, Root2Node};
     {by_id, by_seq} ->
-        {by_seq, LastKey2, Root2Pos, by_id, LastKey1, Root1Pos}
+        {by_seq, LastKey2, Root2Pos, Root2Node,
+            by_id, LastKey1, Root1Pos, Root1Node}
     end.
 
-add_missing_header(Fd) ->
-    todo.
+
+add_missing_header(Fd, LastHeader, BTreeInfos) ->
+    {by_seq, BySeqLastKey, BySeqRootPos, BySeqRootNode,
+        by_id, _ByIdLastKey, ByIdRootPos, ByIdRootNode} = BTreeInfos,
+    {_OldBySeqOffset, OldBySeqRed} =
+        LastHeader#db_header.docinfo_by_seq_btree_state,
+    {_OldByIdOffset, OldByIdRed} =
+        LastHeader#db_header.fulldocinfo_by_id_btree_state,
+    NewHeader = LastHeader#db_header{
+        update_seq = BySeqLastKey,
+        fulldocinfo_by_id_btree_state = {ByIdRootPos, OldByIdRed},
+        docinfo_by_seq_btree_state = {BySeqRootPos, OldBySeqRed}
+    },
+    ok = couch_file:write_header(Fd, NewHeader),
+    ok = couch_file:sync(Fd),
+    {ok, repaired, BTreeInfos}.
+
 
 find_last_btree_root(Fd) ->
     {ok, StartPos} = couch_file:bytes(Fd),
     find_last_btree_root(Fd, StartPos).
+
 
 find_last_btree_root(_Fd, Pos) when Pos < 0 ->
     {nil, -1};
@@ -77,6 +95,7 @@ find_last_btree_root(Fd, Pos) ->
     _ ->
         find_last_btree_root(Fd, Pos - 1)
     end.
+
 
 btree_type(NodePos, _Fd) when NodePos < 0 ->
     nil;
@@ -94,6 +113,7 @@ btree_type(NodePos, Fd) ->
     binary ->
         {by_id, LastKey}
     end.
+
 
 key_type(K) when is_integer(K) ->
     integer;
