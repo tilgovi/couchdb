@@ -24,8 +24,9 @@
     }).
 
 -export([open/1, open/2, close/1, bytes/1, sync/1, append_binary/2,old_pread/3]).
+-export([read_header/1, read_header/2]).
 -export([append_term/2, pread_term/2, pread_iolist/2, write_header/2]).
--export([pread_binary/2, read_header/1, truncate/2, upgrade_old_header/2]).
+-export([pread_binary/2, truncate/2, upgrade_old_header/2]).
 -export([append_term_md5/2,append_binary_md5/2]).
 -export([init/1, terminate/2, handle_call/3, handle_cast/2, code_change/3, handle_info/2]).
 -export([delete/2,delete/3,init_delete_dir/1]).
@@ -103,8 +104,17 @@ append_binary_md5(Fd, Bin) ->
 
 
 pread_term(Fd, Pos) ->
-    {ok, Bin} = pread_binary(Fd, Pos),
-    {ok, binary_to_term(Bin)}.
+    case pread_binary(Fd, Pos) of
+    {ok, Bin} ->
+        try
+            {ok, binary_to_term(Bin)}
+        catch
+        _:_ ->
+            {error, invalid_term}
+        end;
+    Error ->
+        Error
+    end.
 
 
 %%----------------------------------------------------------------------
@@ -115,8 +125,12 @@ pread_term(Fd, Pos) ->
 %%----------------------------------------------------------------------
 
 pread_binary(Fd, Pos) ->
-    {ok, L} = pread_iolist(Fd, Pos),
-    {ok, iolist_to_binary(L)}.
+    case pread_iolist(Fd, Pos) of
+    {ok, L} ->
+        {ok, iolist_to_binary(L)};
+    Error ->
+        Error
+    end.
 
 
 pread_iolist(Fd, Pos) ->
@@ -210,11 +224,18 @@ old_pread(Fd, Pos, Len) ->
 upgrade_old_header(Fd, Sig) ->
     gen_server:call(Fd, {upgrade_old_header, Sig}, infinity).
 
-
 read_header(Fd) ->
+    read_header(Fd, []).
+
+read_header(Fd, Options) ->
     case gen_server:call(Fd, find_header, infinity) of
-    {ok, Bin} ->
-        {ok, binary_to_term(Bin)};
+    {ok, Bin, HeaderPos} ->
+        case lists:member(return_pos, Options) of
+        false ->
+            {ok, binary_to_term(Bin)};
+        true ->
+            {ok, binary_to_term(Bin), HeaderPos}
+        end;
     Else ->
         Else
     end.
@@ -293,20 +314,25 @@ terminate(_Reason, _Fd) ->
 
 
 handle_call({pread_iolist, Pos}, _From, File) ->
-    {LenIolist, NextPos} = read_raw_iolist_int(File, Pos, 4),
-    case iolist_to_binary(LenIolist) of
-    <<1:1/integer,Len:31/integer>> -> % an MD5-prefixed term
-        {Md5AndIoList, _} = read_raw_iolist_int(File, NextPos, Len+16),
-        {Md5, IoList} = extract_md5(Md5AndIoList),
-        case couch_util:md5(IoList) of
-        Md5 ->
-            {reply, {ok, IoList}, File};
-        _ ->
-            {stop, file_corruption, {error,file_corruption}, File}
-        end;
-    <<0:1/integer,Len:31/integer>> ->
-        {Iolist, _} = read_raw_iolist_int(File, NextPos, Len),
-        {reply, {ok, Iolist}, File}
+    try
+        {LenIolist, NextPos} = read_raw_iolist_int(File, Pos, 4),
+        case iolist_to_binary(LenIolist) of
+        <<1:1/integer,Len:31/integer>> -> % an MD5-prefixed term
+            {Md5AndIoList, _} = read_raw_iolist_int(File, NextPos, Len+16),
+            {Md5, IoList} = extract_md5(Md5AndIoList),
+            case couch_util:md5(IoList) of
+            Md5 ->
+                {reply, {ok, IoList}, File};
+            _ ->
+                {stop, file_corruption, {error,file_corruption}, File}
+            end;
+        <<0:1/integer,Len:31/integer>> ->
+            {Iolist, _} = read_raw_iolist_int(File, NextPos, Len),
+            {reply, {ok, Iolist}, File}
+        end
+    catch
+    throw:invalid_iolist ->
+        {reply, {error, invalid_iolist}, File}
     end;
 handle_call({pread, Pos, Bytes}, _From, #file{fd=Fd,tail_append_begin=TailAppendBegin}=File) ->
     {ok, Bin} = file:pread(Fd, Pos, Bytes),
@@ -484,13 +510,12 @@ handle_info({'EXIT', _, normal}, Fd) ->
 handle_info({'EXIT', _, Reason}, Fd) ->
     {stop, Reason, Fd}.
 
-
 find_header(_Fd, -1) ->
     no_valid_header;
 find_header(Fd, Block) ->
     case (catch load_header(Fd, Block)) of
     {ok, Bin} ->
-        {ok, Bin};
+        {ok, Bin, Block * ?SIZE_BLOCK};
     _Error ->
         find_header(Fd, Block -1)
     end.
@@ -511,13 +536,17 @@ load_header(Fd, Block) ->
 read_raw_iolist_int(#file{fd=Fd, tail_append_begin=TAB}, Pos, Len) ->
     BlockOffset = Pos rem ?SIZE_BLOCK,
     TotalBytes = calculate_total_read_len(BlockOffset, Len),
-    {ok, <<RawBin:TotalBytes/binary>>} = file:pread(Fd, Pos, TotalBytes),
-    if Pos >= TAB ->
-        {remove_block_prefixes(BlockOffset, RawBin), Pos + TotalBytes};
-    true ->
-        % 09 UPGRADE CODE
-        <<ReturnBin:Len/binary, _/binary>> = RawBin,
-        {[ReturnBin], Pos + Len}
+    case file:pread(Fd, Pos, TotalBytes) of
+    {ok, <<RawBin:TotalBytes/binary>>} ->
+        if Pos >= TAB ->
+            {remove_block_prefixes(BlockOffset, RawBin), Pos + TotalBytes};
+        true ->
+            % 09 UPGRADE CODE
+            <<ReturnBin:Len/binary, _/binary>> = RawBin,
+            {[ReturnBin], Pos + Len}
+        end;
+    _ ->
+        throw(invalid_iolist)
     end.
 
 -spec extract_md5(iolist()) -> {binary(), iolist()}.
