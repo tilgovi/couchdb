@@ -33,14 +33,14 @@ maybe_add_missing_header(Fd) ->
     no_valid_header ->
         no_header; % TODO: ignore?
     {ok, Header, HeaderPos} ->
-        case find_last_btree_root(Fd) of
+        case find_last_btree_root(Fd, by_seq) of
         {nil, _} ->
             ok;
-        {_, NodePos, _, _} = Root1Info when NodePos > HeaderPos ->
-            Root2Info = find_last_btree_root(Fd, NodePos - 1),
+        {_, NodePos, _, _} = BySeqInfo when NodePos > HeaderPos ->
+            ByIdInfo = find_last_btree_root(Fd, by_id),
             add_missing_header(
                 Fd, Header,
-                sort_btree_infos(Root1Info, Root2Info)
+                sort_btree_infos(ByIdInfo, BySeqInfo)
             );
         _ ->
             ok
@@ -61,8 +61,8 @@ sort_btree_infos({Root1Node, Root1Pos, BTree1Type, LastKey1},
 
 
 add_missing_header(Fd, LastHeader, BTreeInfos) ->
-    {by_seq, BySeqLastKey, BySeqRootPos, BySeqRootNode,
-        by_id, _ByIdLastKey, ByIdRootPos, ByIdRootNode} = BTreeInfos,
+    {by_seq, BySeqLastKey, BySeqRootPos, _BySeqRootNode,
+        by_id, _ByIdLastKey, ByIdRootPos, _ByIdRootNode} = BTreeInfos,
     {_OldBySeqOffset, OldBySeqRed} =
         LastHeader#db_header.docinfo_by_seq_btree_state,
     {_OldByIdOffset, OldByIdRed} =
@@ -77,23 +77,33 @@ add_missing_header(Fd, LastHeader, BTreeInfos) ->
     {ok, repaired, BTreeInfos}.
 
 
-find_last_btree_root(Fd) ->
+find_last_btree_root(Fd, Type) ->
     {ok, StartPos} = couch_file:bytes(Fd),
-    find_last_btree_root(Fd, StartPos).
+    find_last_btree_root(Fd, Type, StartPos).
 
 
-find_last_btree_root(_Fd, Pos) when Pos < 0 ->
+find_last_btree_root(_Fd, _Type, Pos) when Pos < 0 ->
     {nil, -1};
-find_last_btree_root(Fd, Pos) ->
+find_last_btree_root(Fd, BTreeType, Pos) ->
     case couch_file:pread_term(Fd, Pos) of
     {ok, {kv_node, _} = Node} ->
         {Type, LastKey} = btree_type(Pos, Fd),
-        {Node, Pos, Type, LastKey};
+        case Type of
+        BTreeType ->
+            {Node, Pos, Type, LastKey};
+        _Other ->
+            find_last_btree_root(Fd, BTreeType, Pos - 1)
+        end;
     {ok, {kp_node, _} = Node} ->
         {Type, LastKey} = btree_type(Pos, Fd),
-        {Node, Pos, Type, LastKey};
+        case Type of
+        BTreeType ->
+            {Node, Pos, Type, LastKey};
+        _Other ->
+            find_last_btree_root(Fd, BTreeType, Pos - 1)
+        end;
     _ ->
-        find_last_btree_root(Fd, Pos - 1)
+        find_last_btree_root(Fd, BTreeType, Pos - 1)
     end.
 
 
