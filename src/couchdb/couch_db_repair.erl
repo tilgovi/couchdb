@@ -13,7 +13,7 @@
 -module(couch_db_repair).
 
 -compile(export_all).
--export([repair/1, merge_to_file/2]).
+-export([repair/1, merge_to_file/2, make_lost_and_found/1]).
 
 -include("couch_db.hrl").
 
@@ -140,18 +140,36 @@ merge_to_file(Db, TargetName) ->
     TargetDb = TargetDb0#db{fsync_options = [before_header]},
 
     {ok, _, {_, FinalDocs}} =
-    couch_btree:fold(Db#db.docinfo_by_seq_btree, fun(DocInfo, _, {I, Acc}) ->
-        #doc_info{id=Id, revs = RevsInfo} = DocInfo,
+    couch_btree:fold(Db#db.fulldocinfo_by_id_btree, fun(FDI, _, {I, Acc}) ->
+        #doc_info{id=Id, revs = RevsInfo} = couch_doc:to_doc_info(FDI),
         LeafRevs = [Rev || #rev_info{rev=Rev} <- RevsInfo],
         {ok, Docs} = couch_db:open_doc_revs(Db, Id, LeafRevs, [latest]),
         if I > 1000 ->
             couch_db:update_docs(TargetDb, [Doc || {ok, Doc} <- Acc],
                 [full_commit], replicated_changes),
+            ?LOG_INFO("writing ~p updates to ~s", [I, TargetName]),
             {ok, {length(Docs), Docs}};
         true ->
             {ok, {I+length(Docs), Docs ++ Acc}}
         end
     end, {0, []}, []),
+    ?LOG_INFO("writing ~p updates to ~s", [length(FinalDocs), TargetName]),
     couch_db:update_docs(TargetDb, [Doc || {ok, Doc} <- FinalDocs],
         [full_commit], replicated_changes),
     couch_db:close(TargetDb).
+
+make_lost_and_found(DbName) ->
+    TargetName = ?l2b(["lost+found/", DbName]),
+    RootDir = couch_config:get("couchdb", "database_dir", "."),
+    FullPath = filename:join([RootDir, "./" ++ DbName ++ ".couch"]),
+    {ok, Fd} = couch_file:open(FullPath, []),
+    {ok, Db} = couch_db:open(?l2b(DbName), []),
+    BtOptions = [
+        {split, fun couch_db_updater:btree_by_id_split/1},
+        {join, fun couch_db_updater:btree_by_id_join/2},
+        {reduce, fun couch_db_updater:btree_by_id_reduce/3}
+    ],
+    lists:foreach(fun(Root) ->
+        {ok, Bt} = couch_btree:open({Root, 0}, Fd, BtOptions),
+        merge_to_file(Db#db{fulldocinfo_by_id_btree = Bt}, TargetName)
+    end, couch_db_repair_b:repair(DbName)).
