@@ -176,7 +176,10 @@ make_lost_and_found(DbName, FullPath, TargetName) ->
     ],
     lists:foreach(fun(Root) ->
         {ok, Bt} = couch_btree:open({Root, 0}, Fd, BtOptions),
-        merge_to_file(Db#db{fulldocinfo_by_id_btree = Bt}, TargetName)
+        try merge_to_file(Db#db{fulldocinfo_by_id_btree = Bt}, TargetName)
+        catch _:Reason ->
+            ?LOG_ERROR("~p merge node at ~p ~p", [?MODULE, Root, Reason])
+        end
     end, find_nodes_quickly(Fd)).
 
 %% @doc returns a list of offsets in the file corresponding to locations of
