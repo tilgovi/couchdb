@@ -62,22 +62,19 @@ sort_btree_infos({Root1Node, Root1Pos, BTree1Type, LastKey1},
             by_id, LastKey1, Root1Pos, Root1Node}
     end.
 
-prune_nodes(_Fd, [], {AccLost, AccFound}) ->
-    {AccLost, AccFound};
-prune_nodes(Fd, [Pos|Rest], {AccLost, AccFound}) ->
+prune_nodes(_Fd, [], AccFound) ->
+    AccFound;
+prune_nodes(Fd, [Pos|Rest], AccFound) ->
     case couch_file:pread_term(Fd, Pos) of
     % Key-Value nodes might also be root nodes, but don't contain any pointers
     % to other nodes => we can't eliminate positions from the Acc
     {ok, {kv_node, _}} ->
-        AccLost1 = sets:subtract(sets:add_element(Pos, AccLost), AccFound),
-        prune_nodes(Fd, Rest, {AccLost1, AccFound});
+        prune_nodes(Fd, Rest, AccFound);
     {ok, {kp_node, Children}} ->
         ChildrenPos = sets:from_list([P || {_DocId, {P, _}} <- Children]),
         % Remove all positions from Acc that have pointers (Children) in the
         % current node
-        AccFound1 = sets:union(AccFound, ChildrenPos),
-        AccLost1 = sets:subtract(sets:add_element(Pos, AccLost), AccFound),
-        prune_nodes(Fd, Rest, {AccLost1, AccFound1})
+        prune_nodes(Fd, Rest, sets:union(AccFound, ChildrenPos))
     end.
 
 
@@ -193,12 +190,11 @@ make_lost_and_found(DbName) ->
         {reduce, fun couch_db_updater:btree_by_id_reduce/3}
     ],
     Nodes = find_nodes_quickly(Fd),
-    {LostNodes, _} = prune_nodes(Fd, Nodes, {sets:from_list(Nodes),
-        sets:from_list([RootPos])}),
+    FoundNodes = prune_nodes(Fd, Nodes, sets:from_list([RootPos])),
     sets:fold(fun(Root, _) ->
         {ok, Bt} = couch_btree:open({Root, 0}, Fd, BtOptions),
         merge_to_file(Db#db{fulldocinfo_by_id_btree = Bt}, TargetName)
-    end, nil, LostNodes).
+    end, nil, sets:subtract(sets:from_list(Nodes), FoundNodes)).
 
 %% @doc returns a list of offsets in the file corresponding to locations of
 %%      all kp and kv_nodes from the by_id tree
