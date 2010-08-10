@@ -324,7 +324,7 @@ handle_call({pread_iolist, Pos}, _From, File) ->
             Md5 ->
                 {reply, {ok, IoList}, File};
             _ ->
-                {stop, file_corruption, {error,file_corruption}, File}
+                {reply, {error,file_corruption}, File}
             end;
         <<0:1/integer,Len:31/integer>> ->
             {Iolist, _} = read_raw_iolist_int(File, NextPos, Len),
