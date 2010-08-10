@@ -62,14 +62,14 @@ sort_btree_infos({Root1Node, Root1Pos, BTree1Type, LastKey1},
             by_id, LastKey1, Root1Pos, Root1Node}
     end.
 
-prune_nodes(Fd, [], {AccLost, AccFound}) ->
+prune_nodes(_Fd, [], {AccLost, AccFound}) ->
     {AccLost, AccFound};
-prune_nodes(Fd, [Pos|Rest], {AccLost, AccFound}=Acc) ->
+prune_nodes(Fd, [Pos|Rest], {AccLost, AccFound}) ->
     ?LOG_DEBUG("prune_nodes: ~p", [Pos]),
     case couch_file:pread_term(Fd, Pos) of
     % Key-Value nodes might also be root nodes, but don't contain any pointers
     % to other nodes => we can't eliminate positions from the Acc
-    {ok, {kv_node, Contents}=Node} ->
+    {ok, {kv_node, _}=Node} ->
         ?LOG_DEBUG("prune_nodes: Node: ~p", [Node]),
         AccLost1 = sets:subtract(sets:add_element(Pos, AccLost), AccFound),
         prune_nodes(Fd, Rest, {AccLost1, AccFound});
@@ -260,11 +260,11 @@ node_acc(Fd, Pos, Acc, Retry) when Pos >= 0 ->
             when Type == kp_node; Type == kv_node ->
         ?LOG_DEBUG("found a _local ~p at ~p", [Type, Pos]),
         Acc;
-    {ok, {Type, [{<<Key/binary>>,_}|_]}}
+    {ok, {Type, [{<<_/binary>>,_}|_]}}
             when Type == kp_node; Type == kv_node ->
         ?LOG_DEBUG("found an id ~p at ~p", [Type, Pos]),
         [Pos | Acc];
-    {ok, {Type, [{Key,_}|_]}}
+    {ok, {Type, [{_,_}|_]}}
             when Type == kp_node; Type == kv_node ->
         ?LOG_DEBUG("found a seq ~p at ~p", [Type, Pos]),
         Acc;
