@@ -149,13 +149,14 @@ merge_to_file(Db, TargetName) ->
         if I > 1000 ->
             couch_db:update_docs(TargetDb, [Doc || {ok, Doc} <- Acc],
                 [full_commit], replicated_changes),
-            ?LOG_INFO("writing ~p updates to ~s", [I, TargetName]),
+            ?LOG_INFO("~p writing ~p updates to ~s", [?MODULE, I, TargetName]),
             {ok, {length(Docs), Docs}};
         true ->
             {ok, {I+length(Docs), Docs ++ Acc}}
         end
     end, {0, []}, []),
-    ?LOG_INFO("writing ~p updates to ~s", [length(FinalDocs), TargetName]),
+    ?LOG_INFO("~p writing ~p updates to ~s", [?MODULE, length(FinalDocs),
+        TargetName]),
     couch_db:update_docs(TargetDb, [Doc || {ok, Doc} <- FinalDocs],
         [full_commit], replicated_changes),
     couch_db:close(TargetDb).
@@ -174,6 +175,7 @@ make_lost_and_found(DbName, FullPath, TargetName) ->
         {join, fun couch_db_updater:btree_by_id_join/2},
         {reduce, fun couch_db_updater:btree_by_id_reduce/3}
     ],
+    put(dbname, DbName),
     lists:foreach(fun(Root) ->
         {ok, Bt} = couch_btree:open({Root, 0}, Fd, BtOptions),
         try merge_to_file(Db#db{fulldocinfo_by_id_btree = Bt}, TargetName)
@@ -188,6 +190,7 @@ find_nodes_quickly(DbName) when is_list(DbName) ->
     RootDir = couch_config:get("couchdb", "database_dir", "."),
     FullPath = filename:join([RootDir, "./" ++ DbName ++ ".couch"]),
     {ok, Fd} = couch_file:open(FullPath, []),
+    put(dbname, DbName),
     try find_nodes_quickly(Fd) after couch_file:close(Fd) end;
 find_nodes_quickly(Fd) ->
     {ok, EOF} = couch_file:bytes(Fd),
@@ -196,6 +199,8 @@ find_nodes_quickly(Fd) ->
 read_file(Fd, LastPos, Acc) ->
     ChunkSize = erlang:min(?CHUNK_SIZE, LastPos),
     Pos = LastPos - ChunkSize,
+    ?LOG_INFO("~p for ~s - scanning ~p bytes at ~p", [?MODULE, get(dbname),
+        ChunkSize, Pos]),
     {ok, Data, _} = gen_server:call(Fd, {pread, Pos, ChunkSize}),
     Nodes = read_data(Fd, Data, 0, Pos, []),
     if Pos == 0 ->
