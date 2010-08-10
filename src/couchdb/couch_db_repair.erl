@@ -201,10 +201,7 @@ make_lost_and_found(DbName) ->
 
 %% @doc returns a list of offsets in the file corresponding to locations of
 %%      all kp and kv_nodes
-find_nodes_quickly(DbName) ->
-    RootDir = couch_config:get("couchdb", "database_dir", "."),
-    FullPath = filename:join([RootDir, "./" ++ DbName ++ ".couch"]),
-    {ok, Fd} = couch_file:open(FullPath, []),
+find_nodes_quickly(Fd) ->
     {ok, EOF} = couch_file:bytes(Fd),
     read_file(Fd, EOF, []).
 
