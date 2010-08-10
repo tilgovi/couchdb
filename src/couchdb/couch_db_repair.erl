@@ -201,43 +201,23 @@ read_file(Fd, LastPos, Acc) ->
 
 read_data(Fd, Data, Pos, Offset, Acc0) when Pos < byte_size(Data) ->
     FullOffset = Pos + Offset,
+    % look for serialized terms that start with {kv_node,
+    <<Pattern:12/binary, _/binary>> = term_to_binary({kv_node, nil}),
     Match = case Data of
-    <<_:Pos/binary, 131,104,2,100,0,7,107,118,95,110,111,100, _/binary>> ->
+    <<_:Pos/binary, Pattern:12/binary, _/binary>> ->
         % the ideal case, a full pattern match
         true;
-    <<_:Pos/binary, 131,104,2,100,0,7,107,118,95,110,111, _/binary>> when
-            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 11) ->
-        true;
-    <<_:Pos/binary, 131,104,2,100,0,7,107,118,95,110, _/binary>> when
-            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 10) ->
-        true;
-    <<_:Pos/binary, 131,104,2,100,0,7,107,118,95, _/binary>> when
-            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 9) ->
-        true;
-    <<_:Pos/binary, 131,104,2,100,0,7,107,118, _/binary>> when
-            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 8) ->
-        true;
-    <<_:Pos/binary, 131,104,2,100,0,7,107, _/binary>> when
-            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 7) ->
-        true;
-    <<_:Pos/binary, 131,104,2,100,0,7, _/binary>> when
-            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 6) ->
-        true;
-    <<_:Pos/binary, 131,104,2,100,0, _/binary>> when
-            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 5) ->
-        true;
-    <<_:Pos/binary, 131,104,2,100, _/binary>> when
-            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 4) ->
-        true;
-    <<_:Pos/binary, 131,104,2, _/binary>> when
-            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 3) ->
-        true;
-    <<_:Pos/binary, 131,104, _/binary>> when
-            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 2) ->
-        true;
-    <<_:Pos/binary, 131, _/binary>> when
-            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 1) ->
-        true;
+    <<_:Pos/binary, SplitTerm:13/binary, _/binary>> when
+            (FullOffset rem ?SIZE_BLOCK) > (?SIZE_BLOCK - 12) ->
+        % check if the term is split across the block boundary
+        N = ?SIZE_BLOCK - (FullOffset rem ?SIZE_BLOCK),
+        M = 12 - N,
+        case SplitTerm of <<Head:N/binary, 0, Tail:M/binary>> ->
+            <<Head/binary, Tail/binary>> =:= Pattern;
+        _Else ->
+            % next block is a header, this can't be a kv_node
+            false
+        end;
     _ ->
         false
     end,
