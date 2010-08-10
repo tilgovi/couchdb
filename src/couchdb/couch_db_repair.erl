@@ -62,6 +62,28 @@ sort_btree_infos({Root1Node, Root1Pos, BTree1Type, LastKey1},
             by_id, LastKey1, Root1Pos, Root1Node}
     end.
 
+prune_nodes(Fd, [], {AccLost, AccFound}) ->
+    {AccLost, AccFound};
+prune_nodes(Fd, [Pos|Rest], {AccLost, AccFound}=Acc) ->
+    ?LOG_DEBUG("prune_nodes: ~p", [Pos]),
+    case couch_file:pread_term(Fd, Pos) of
+    % Key-Value nodes might also be root nodes, but don't contain any pointers
+    % to other nodes => we can't eliminate positions from the Acc
+    {ok, {kv_node, Contents}=Node} ->
+        ?LOG_DEBUG("prune_nodes: Node: ~p", [Node]),
+        AccLost1 = sets:subtract(sets:add_element(Pos, AccLost), AccFound),
+        prune_nodes(Fd, Rest, {AccLost1, AccFound});
+    {ok, {kp_node, Children}} ->
+        ?LOG_DEBUG("prune_nodes: Children: ~p", [Children]),
+        ChildrenPos = sets:from_list([P || {_DocId, {P, _}} <- Children]),
+        %?LOG_DEBUG("go_backwards: ChildrenPos: ~p", [ChildrenPos]),
+        % Remove all positions from Acc that have pointers (Children) in the
+        % current node
+        AccFound1 = sets:union(AccFound, ChildrenPos),
+        AccLost1 = sets:subtract(sets:add_element(Pos, AccLost), AccFound),
+        prune_nodes(Fd, Rest, {AccLost1, AccFound1})
+    end.
+
 
 add_missing_header(Fd, LastHeader, BTreeInfos) ->
     {by_seq, BySeqLastKey, BySeqRootPos, _BySeqRootNode,
