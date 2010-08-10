@@ -62,22 +62,6 @@ sort_btree_infos({Root1Node, Root1Pos, BTree1Type, LastKey1},
             by_id, LastKey1, Root1Pos, Root1Node}
     end.
 
-prune_nodes(_Fd, [], AccFound) ->
-    AccFound;
-prune_nodes(Fd, [Pos|Rest], AccFound) ->
-    case couch_file:pread_term(Fd, Pos) of
-    % Key-Value nodes might also be root nodes, but don't contain any pointers
-    % to other nodes => we can't eliminate positions from the Acc
-    {ok, {kv_node, _}} ->
-        prune_nodes(Fd, Rest, AccFound);
-    {ok, {kp_node, Children}} ->
-        ChildrenPos = sets:from_list([P || {_DocId, {P, _}} <- Children]),
-        % Remove all positions from Acc that have pointers (Children) in the
-        % current node
-        prune_nodes(Fd, Rest, sets:union(AccFound, ChildrenPos))
-    end.
-
-
 add_missing_header(Fd, LastHeader, BTreeInfos) ->
     {by_seq, BySeqLastKey, BySeqRootPos, _BySeqRootNode,
         by_id, _ByIdLastKey, ByIdRootPos, _ByIdRootNode} = BTreeInfos,
@@ -183,18 +167,15 @@ make_lost_and_found(DbName) ->
     {ok, Fd} = couch_file:open(FullPath, []),
 
     {ok, Db} = couch_db:open(?l2b(DbName), []),
-    {RootPos, _} = couch_btree:get_state(Db#db.fulldocinfo_by_id_btree),
     BtOptions = [
         {split, fun couch_db_updater:btree_by_id_split/1},
         {join, fun couch_db_updater:btree_by_id_join/2},
         {reduce, fun couch_db_updater:btree_by_id_reduce/3}
     ],
-    Nodes = find_nodes_quickly(Fd),
-    FoundNodes = prune_nodes(Fd, Nodes, sets:from_list([RootPos])),
-    sets:fold(fun(Root, _) ->
+    lists:foreach(fun(Root) ->
         {ok, Bt} = couch_btree:open({Root, 0}, Fd, BtOptions),
         merge_to_file(Db#db{fulldocinfo_by_id_btree = Bt}, TargetName)
-    end, nil, sets:subtract(sets:from_list(Nodes), FoundNodes)).
+    end, find_nodes_quickly(Fd)).
 
 %% @doc returns a list of offsets in the file corresponding to locations of
 %%      all kp and kv_nodes from the by_id tree
@@ -216,8 +197,23 @@ read_file(Fd, LastPos, Acc) ->
 read_data(Fd, Data, Pos, Offset, Acc0) when Pos < byte_size(Data) ->
     FullOffset = Pos + Offset,
     Match = case Data of
-    <<_:Pos/binary, 131,104,2,100,0,7,107, _/binary>> ->
+    <<_:Pos/binary, 131,104,2,100,0,7,107,118,95,110,111,100, _/binary>> ->
         % the ideal case, a full pattern match
+        true;
+    <<_:Pos/binary, 131,104,2,100,0,7,107,118,95,110,111, _/binary>> when
+            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 11) ->
+        true;
+    <<_:Pos/binary, 131,104,2,100,0,7,107,118,95,110, _/binary>> when
+            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 10) ->
+        true;
+    <<_:Pos/binary, 131,104,2,100,0,7,107,118,95, _/binary>> when
+            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 9) ->
+        true;
+    <<_:Pos/binary, 131,104,2,100,0,7,107,118, _/binary>> when
+            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 8) ->
+        true;
+    <<_:Pos/binary, 131,104,2,100,0,7,107, _/binary>> when
+            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 7) ->
         true;
     <<_:Pos/binary, 131,104,2,100,0,7, _/binary>> when
             (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 6) ->
@@ -249,7 +245,7 @@ node_acc(Fd, Pos, Acc, Retry) when Pos >= 0 ->
     case couch_file:pread_term(Fd, Pos) of
     {ok, {_, [{<<"_local/",_/binary>>,_}|_]}} ->
         Acc;
-    {ok, {Type, [{<<_/binary>>,_}|_]}} when Type == kp_node; Type == kv_node ->
+    {ok, {kv_node, [{<<_/binary>>,_}|_]}} ->
         [Pos | Acc];
     {ok, _} ->
         Acc;
