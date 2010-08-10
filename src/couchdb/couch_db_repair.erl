@@ -65,18 +65,14 @@ sort_btree_infos({Root1Node, Root1Pos, BTree1Type, LastKey1},
 prune_nodes(_Fd, [], {AccLost, AccFound}) ->
     {AccLost, AccFound};
 prune_nodes(Fd, [Pos|Rest], {AccLost, AccFound}) ->
-    ?LOG_DEBUG("prune_nodes: ~p", [Pos]),
     case couch_file:pread_term(Fd, Pos) of
     % Key-Value nodes might also be root nodes, but don't contain any pointers
     % to other nodes => we can't eliminate positions from the Acc
-    {ok, {kv_node, _}=Node} ->
-        ?LOG_DEBUG("prune_nodes: Node: ~p", [Node]),
+    {ok, {kv_node, _}} ->
         AccLost1 = sets:subtract(sets:add_element(Pos, AccLost), AccFound),
         prune_nodes(Fd, Rest, {AccLost1, AccFound});
     {ok, {kp_node, Children}} ->
-        ?LOG_DEBUG("prune_nodes: Children: ~p", [Children]),
         ChildrenPos = sets:from_list([P || {_DocId, {P, _}} <- Children]),
-        %?LOG_DEBUG("go_backwards: ChildrenPos: ~p", [ChildrenPos]),
         % Remove all positions from Acc that have pointers (Children) in the
         % current node
         AccFound1 = sets:union(AccFound, ChildrenPos),
@@ -191,7 +187,6 @@ make_lost_and_found(DbName) ->
 
     {ok, Db} = couch_db:open(?l2b(DbName), []),
     {RootPos, _} = couch_btree:get_state(Db#db.fulldocinfo_by_id_btree),
-    ?LOG_DEBUG("Root position: ~p", [RootPos]),
     BtOptions = [
         {split, fun couch_db_updater:btree_by_id_split/1},
         {join, fun couch_db_updater:btree_by_id_join/2},
@@ -206,7 +201,7 @@ make_lost_and_found(DbName) ->
     end, nil, LostNodes).
 
 %% @doc returns a list of offsets in the file corresponding to locations of
-%%      all kp and kv_nodes
+%%      all kp and kv_nodes from the by_id tree
 find_nodes_quickly(Fd) ->
     {ok, EOF} = couch_file:bytes(Fd),
     read_file(Fd, EOF, []).
@@ -256,22 +251,13 @@ read_data(_Fd, _Data, _Pos, _Offset, AccOut) ->
 
 node_acc(Fd, Pos, Acc, Retry) when Pos >= 0 ->
     case couch_file:pread_term(Fd, Pos) of
-    {ok, {Type, [{<<"_local/",_/binary>>,_}|_]}}
-            when Type == kp_node; Type == kv_node ->
-        ?LOG_DEBUG("found a _local ~p at ~p", [Type, Pos]),
+    {ok, {_, [{<<"_local/",_/binary>>,_}|_]}} ->
         Acc;
-    {ok, {Type, [{<<_/binary>>,_}|_]}}
-            when Type == kp_node; Type == kv_node ->
-        ?LOG_DEBUG("found an id ~p at ~p", [Type, Pos]),
+    {ok, {Type, [{<<_/binary>>,_}|_]}} when Type == kp_node; Type == kv_node ->
         [Pos | Acc];
-    {ok, {Type, [{_,_}|_]}}
-            when Type == kp_node; Type == kv_node ->
-        ?LOG_DEBUG("found a seq ~p at ~p", [Type, Pos]),
-        Acc;
     {ok, _} ->
         Acc;
-    Error ->
-        ?LOG_DEBUG("found a 131 at ~p - ~p", [Pos, Error]),
+    _Error ->
         if Retry, (Pos > 0) -> node_acc(Fd, Pos-1, Acc, false); true -> Acc end
     end;
 node_acc(_, _, Acc, _) ->
