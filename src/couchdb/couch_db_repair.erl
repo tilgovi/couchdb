@@ -14,7 +14,7 @@
 
 -compile(export_all).
 -export([repair/1, merge_to_file/2, make_lost_and_found/1,
-    find_nodes_quickly/1]).
+         make_lost_and_found/3, find_nodes_quickly/1]).
 
 -include("couch_db.hrl").
 
@@ -164,8 +164,10 @@ make_lost_and_found(DbName) ->
     TargetName = ?l2b(["lost+found/", DbName]),
     RootDir = couch_config:get("couchdb", "database_dir", "."),
     FullPath = filename:join([RootDir, "./" ++ DbName ++ ".couch"]),
-    {ok, Fd} = couch_file:open(FullPath, []),
+    make_lost_and_found(DbName, FullPath, TargetName).
 
+make_lost_and_found(DbName, FullPath, TargetName) ->
+    {ok, Fd} = couch_file:open(FullPath, []),
     {ok, Db} = couch_db:open(?l2b(DbName), []),
     BtOptions = [
         {split, fun couch_db_updater:btree_by_id_split/1},
