@@ -250,9 +250,18 @@ read_data(_Fd, _Data, _Pos, _Offset, AccOut) ->
 
 node_acc(Fd, Pos, Acc, Retry) when Pos >= 0 ->
     case couch_file:pread_term(Fd, Pos) of
-    {ok, {Type, _}} when Type == kp_node; Type == kv_node ->
-        ?LOG_DEBUG("found a ~p at ~p", [Type, Pos]),
+    {ok, {Type, [{<<"_local/",_/binary>>,_}|_]}}
+            when Type == kp_node; Type == kv_node ->
+        ?LOG_DEBUG("found a _local ~p at ~p", [Type, Pos]),
+        Acc;
+    {ok, {Type, [{<<Key/binary>>,_}|_]}}
+            when Type == kp_node; Type == kv_node ->
+        ?LOG_DEBUG("found an id ~p at ~p", [Type, Pos]),
         [Pos | Acc];
+    {ok, {Type, [{Key,_}|_]}}
+            when Type == kp_node; Type == kv_node ->
+        ?LOG_DEBUG("found a seq ~p at ~p", [Type, Pos]),
+        Acc;
     {ok, _} ->
         Acc;
     Error ->
