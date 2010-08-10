@@ -13,10 +13,12 @@
 -module(couch_db_repair).
 
 -compile(export_all).
--export([repair/1, merge_to_file/2, make_lost_and_found/1]).
+-export([repair/1, merge_to_file/2, make_lost_and_found/1,
+    find_nodes_quickly/1]).
 
 -include("couch_db.hrl").
 
+-define(CHUNK_SIZE, 1048576).
 
 repair(DbName) ->
     RootDir = couch_config:get("couchdb", "database_dir", "."),
@@ -173,3 +175,53 @@ make_lost_and_found(DbName) ->
         {ok, Bt} = couch_btree:open({Root, 0}, Fd, BtOptions),
         merge_to_file(Db#db{fulldocinfo_by_id_btree = Bt}, TargetName)
     end, couch_db_repair_b:repair(DbName)).
+
+%% @doc returns a list of offsets in the file corresponding to locations of
+%%      all kp and kv_nodes
+find_nodes_quickly(DbName) ->
+    RootDir = couch_config:get("couchdb", "database_dir", "."),
+    FullPath = filename:join([RootDir, "./" ++ DbName ++ ".couch"]),
+    {ok, Fd} = couch_file:open(FullPath, []),
+    {ok, EOF} = couch_file:bytes(Fd),
+    read_file(Fd, EOF, []).
+
+read_file(Fd, Pos, Acc) ->
+    ChunkSize = erlang:min(?CHUNK_SIZE, Pos),
+    {ok, Data, _} = gen_server:call(Fd, {pread, Pos - ChunkSize, ChunkSize}),
+    Nodes = read_data(Fd, iolist_to_binary(Data), 0, Pos - ChunkSize, []),
+    if Pos == ChunkSize ->
+        lists:append([Nodes | Acc]);
+    true ->
+        read_file(Fd, Pos - ChunkSize, [Nodes | Acc])
+    end.
+
+read_data(Fd, Data, Pos, Offset, Acc) when Pos < byte_size(Data) ->
+    AccOut = case Data of <<_:Pos/binary, 131, _/binary>> ->
+        case is_node(Fd, Pos + Offset - 4) of
+        true ->
+            [Pos + Offset - 4 | Acc];
+        false ->
+            Acc;
+        invalid ->
+            % TODO maybe we're across the boundary?  We should check
+            % is_node(Fd, Pos + Offset - 5)
+            Acc
+        end;
+    _ ->
+        Acc
+    end,
+    read_data(Fd, Data, Pos+1, Offset, AccOut);
+read_data(_Fd, _Data, _Pos, _Offset, AccOut) ->
+    AccOut.
+
+is_node(Fd, Pos) ->
+    case couch_file:pread_term(Fd, Pos) of
+    {ok, {Type, _}} when Type == kp_node; Type == kv_node ->
+        ?LOG_DEBUG("found a ~p at ~p", [Type, Pos]),
+        true;
+    {ok, _} ->
+        false;
+    Error ->
+        ?LOG_DEBUG("found a 131 - ~p", [Error]),
+        false
+    end.
