@@ -189,10 +189,6 @@ make_lost_and_found(DbName) ->
     FullPath = filename:join([RootDir, "./" ++ DbName ++ ".couch"]),
     {ok, Fd} = couch_file:open(FullPath, []),
 
-    %% TargetName = ?l2b(["lost+found/", DbName]),
-    %% RootDir = couch_config:get("couchdb", "database_dir", "."),
-    %% FullPath = filename:join([RootDir, "./" ++ DbName ++ ".couch"]),
-    %% {ok, FdTarget} = couch_file:open(FullPath, []),
     {ok, Db} = couch_db:open(?l2b(DbName), []),
     {RootPos, _} = couch_btree:get_state(Db#db.fulldocinfo_by_id_btree),
     ?LOG_DEBUG("Root position: ~p", [RootPos]),
@@ -201,13 +197,13 @@ make_lost_and_found(DbName) ->
         {join, fun couch_db_updater:btree_by_id_join/2},
         {reduce, fun couch_db_updater:btree_by_id_reduce/3}
     ],
-    %% lists:foreach(fun(Root) ->
-    %%     {ok, Bt} = couch_btree:open({Root, 0}, Fd, BtOptions),
-    %%     merge_to_file(Db#db{fulldocinfo_by_id_btree = Bt}, TargetName)
-    %% end, couch_db_repair_b:repair(DbName)).
     Nodes = find_nodes_quickly(Fd),
-    {LostNodes, FoundNodes} = prune_nodes(Fd, Nodes,
-            {sets:from_list(Nodes), sets:from_list([RootPos])}).
+    {LostNodes, _} = prune_nodes(Fd, Nodes, {sets:from_list(Nodes),
+        sets:from_list([RootPos])}),
+    sets:fold(fun(Root, _) ->
+        {ok, Bt} = couch_btree:open({Root, 0}, Fd, BtOptions),
+        merge_to_file(Db#db{fulldocinfo_by_id_btree = Bt}, TargetName)
+    end, nil, LostNodes).
 
 %% @doc returns a list of offsets in the file corresponding to locations of
 %%      all kp and kv_nodes
