@@ -611,8 +611,17 @@ update_docs_int(Db, DocsList, NonRepDocs, MergeConflicts, FullCommit) ->
             new_index_entries(FlushedFullDocInfos, [], []),
 
     % and the indexes
-    {ok, DocInfoByIdBTree2} = couch_btree:add_remove(DocInfoByIdBTree, IndexFullDocInfos, []),
-    {ok, DocInfoBySeqBTree2} = couch_btree:add_remove(DocInfoBySeqBTree, IndexDocInfos, RemoveSeqs),
+    Parent = self(),
+    [DocInfoByIdBTree2, DocInfoBySeqBTree2] =
+    [receive {Pid, Result} -> Result end
+     || Pid <-
+            [spawn_link(fun() ->
+                {ok, BTree2} = couch_btree:add_remove(BTree, Update, Remove),
+                Parent ! {self(), BTree2}
+                end)
+             || {BTree, Update, Remove} <-
+                    [{DocInfoByIdBTree, IndexFullDocInfos, []},
+                     {DocInfoBySeqBTree, IndexDocInfos, RemoveSeqs}]]],
 
     Db3 = Db2#db{
         fulldocinfo_by_id_btree = DocInfoByIdBTree2,
