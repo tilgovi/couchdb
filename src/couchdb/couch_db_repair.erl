@@ -19,6 +19,7 @@
 -include("couch_db.hrl").
 
 -define(CHUNK_SIZE, 1048576).
+-define(SIZE_BLOCK, 4096).
 
 repair(DbName) ->
     RootDir = couch_config:get("couchdb", "database_dir", "."),
@@ -185,43 +186,59 @@ find_nodes_quickly(DbName) ->
     {ok, EOF} = couch_file:bytes(Fd),
     read_file(Fd, EOF, []).
 
-read_file(Fd, Pos, Acc) ->
-    ChunkSize = erlang:min(?CHUNK_SIZE, Pos),
-    {ok, Data, _} = gen_server:call(Fd, {pread, Pos - ChunkSize, ChunkSize}),
-    Nodes = read_data(Fd, iolist_to_binary(Data), 0, Pos - ChunkSize, []),
-    if Pos == ChunkSize ->
+read_file(Fd, LastPos, Acc) ->
+    ChunkSize = erlang:min(?CHUNK_SIZE, LastPos),
+    Pos = LastPos - ChunkSize,
+    {ok, Data, _} = gen_server:call(Fd, {pread, Pos, ChunkSize}),
+    Nodes = read_data(Fd, Data, 0, Pos, []),
+    if Pos == 0 ->
         lists:append([Nodes | Acc]);
     true ->
-        read_file(Fd, Pos - ChunkSize, [Nodes | Acc])
+        read_file(Fd, Pos, [Nodes | Acc])
     end.
 
-read_data(Fd, Data, Pos, Offset, Acc) when Pos < byte_size(Data) ->
-    AccOut = case Data of <<_:Pos/binary, 131, _/binary>> ->
-        case is_node(Fd, Pos + Offset - 4) of
-        true ->
-            [Pos + Offset - 4 | Acc];
-        false ->
-            Acc;
-        invalid ->
-            % TODO maybe we're across the boundary?  We should check
-            % is_node(Fd, Pos + Offset - 5)
-            Acc
-        end;
+read_data(Fd, Data, Pos, Offset, Acc0) when Pos < byte_size(Data) ->
+    FullOffset = Pos + Offset,
+    Match = case Data of
+    <<_:Pos/binary, 131,104,2,100,0,7,107, _/binary>> ->
+        % the ideal case, a full pattern match
+        true;
+    <<_:Pos/binary, 131,104,2,100,0,7, _/binary>> when
+            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 6) ->
+        true;
+    <<_:Pos/binary, 131,104,2,100,0, _/binary>> when
+            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 5) ->
+        true;
+    <<_:Pos/binary, 131,104,2,100, _/binary>> when
+            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 4) ->
+        true;
+    <<_:Pos/binary, 131,104,2, _/binary>> when
+            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 3) ->
+        true;
+    <<_:Pos/binary, 131,104, _/binary>> when
+            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 2) ->
+        true;
+    <<_:Pos/binary, 131, _/binary>> when
+            (FullOffset rem ?SIZE_BLOCK) =:= (?SIZE_BLOCK - 1) ->
+        true;
     _ ->
-        Acc
+        false
     end,
-    read_data(Fd, Data, Pos+1, Offset, AccOut);
+    Acc = if Match -> node_acc(Fd, FullOffset - 4, Acc0, true); true -> Acc0 end,
+    read_data(Fd, Data, Pos+1, Offset, Acc);
 read_data(_Fd, _Data, _Pos, _Offset, AccOut) ->
     AccOut.
 
-is_node(Fd, Pos) ->
+node_acc(Fd, Pos, Acc, Retry) when Pos >= 0 ->
     case couch_file:pread_term(Fd, Pos) of
     {ok, {Type, _}} when Type == kp_node; Type == kv_node ->
         ?LOG_DEBUG("found a ~p at ~p", [Type, Pos]),
-        true;
+        [Pos | Acc];
     {ok, _} ->
-        false;
+        Acc;
     Error ->
-        ?LOG_DEBUG("found a 131 - ~p", [Error]),
-        false
-    end.
+        ?LOG_DEBUG("found a 131 at ~p - ~p", [Pos, Error]),
+        if Retry, (Pos > 0) -> node_acc(Fd, Pos-1, Acc, false); true -> Acc end
+    end;
+node_acc(_, _, Acc, _) ->
+    Acc.
