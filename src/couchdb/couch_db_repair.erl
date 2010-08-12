@@ -170,7 +170,8 @@ make_lost_and_found(DbName) ->
 
 make_lost_and_found(DbName, FullPath, TargetName) ->
     {ok, Fd} = couch_file:open(FullPath, []),
-    {ok, Db} = couch_db:open(?l2b(DbName), []),
+    Options = [{user_ctx, #user_ctx{roles = [<<"_admin">>]}}],
+    {ok, Db} = couch_db:open(?l2b(DbName), Options),
     BtOptions = [
         {split, fun couch_db_updater:btree_by_id_split/1},
         {join, fun couch_db_updater:btree_by_id_join/2},
