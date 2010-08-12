@@ -142,25 +142,17 @@ merge_to_file(Db, TargetName) ->
     end,
     TargetDb = TargetDb0#db{fsync_options = [before_header]},
 
-    {ok, _, {_, FinalDocs}} =
-    couch_btree:fold(Db#db.fulldocinfo_by_id_btree, fun(FDI, _, {I, Acc}) ->
+    {ok, _, {FinalDocs, Counter}} =
+    couch_btree:foldl(Db#db.fulldocinfo_by_id_btree, fun(FDI, _, {Acc, I}) ->
         #doc_info{id=Id, revs = RevsInfo} = couch_doc:to_doc_info(FDI),
         LeafRevs = [Rev || #rev_info{rev=Rev} <- RevsInfo],
         {ok, Docs} = couch_db:open_doc_revs(Db, Id, LeafRevs, [latest]),
-        if I > 1000 ->
-            couch_db:update_docs(TargetDb, [Doc || {ok, Doc} <- Acc],
-                [full_commit], replicated_changes),
-            ?LOG_INFO("~p writing ~p updates to ~s", [?MODULE, I, TargetName]),
-            {ok, {length(Docs), Docs}};
-        true ->
-            {ok, {I+length(Docs), Docs ++ Acc}}
-        end
-    end, {0, []}, []),
-    ?LOG_INFO("~p writing ~p updates to ~s", [?MODULE, length(FinalDocs),
-        TargetName]),
-    couch_db:update_docs(TargetDb, [Doc || {ok, Doc} <- FinalDocs],
-        [full_commit], replicated_changes),
-    couch_db:close(TargetDb).
+        {ok, {[Docs | Acc], I+1}}
+    end, {[], 0}),
+    FlatDocs = [Doc || {ok, Doc} <- lists:append(FinalDocs)],
+    couch_db:update_docs(TargetDb, FlatDocs, [full_commit], replicated_changes),
+    couch_db:close(TargetDb),
+    Counter.
 
 make_lost_and_found(DbName) ->
     TargetName = ?l2b(["lost+found/", DbName]),
@@ -178,13 +170,20 @@ make_lost_and_found(DbName, FullPath, TargetName) ->
         {reduce, fun couch_db_updater:btree_by_id_reduce/3}
     ],
     put(dbname, DbName),
-    lists:foreach(fun(Root) ->
+    {Nodes, ChildCount} = find_nodes_quickly(Fd),
+    ?LOG_INFO("~p found ~p possible updates for ~s", [?MODULE, ChildCount,
+        DbName]),
+    lists:foldl(fun(Root, Progress) ->
         {ok, Bt} = couch_btree:open({Root, 0}, Fd, BtOptions),
-        try merge_to_file(Db#db{fulldocinfo_by_id_btree = Bt}, TargetName)
+        try merge_to_file(Db#db{fulldocinfo_by_id_btree = Bt}, TargetName) of
+        UpdateCount ->
+            ?LOG_INFO("~p processed ~p of ~p updates for ~s", [?MODULE,
+                Progress + UpdateCount, ChildCount, DbName]),
+            Progress + UpdateCount
         catch _:Reason ->
             ?LOG_ERROR("~p merge node at ~p ~p", [?MODULE, Root, Reason])
         end
-    end, find_nodes_quickly(Fd)).
+    end, 0, Nodes).
 
 %% @doc returns a list of offsets in the file corresponding to locations of
 %%      all kp and kv_nodes from the by_id tree
@@ -196,7 +195,7 @@ find_nodes_quickly(DbName) when is_list(DbName) ->
     try find_nodes_quickly(Fd) after couch_file:close(Fd) end;
 find_nodes_quickly(Fd) ->
     {ok, EOF} = couch_file:bytes(Fd),
-    read_file(Fd, EOF, []).
+    read_file(Fd, EOF, {[], 0}).
 
 read_file(Fd, LastPos, Acc) ->
     ChunkSize = erlang:min(?CHUNK_SIZE, LastPos),
@@ -204,11 +203,11 @@ read_file(Fd, LastPos, Acc) ->
     ?LOG_INFO("~p for ~s - scanning ~p bytes at ~p", [?MODULE, get(dbname),
         ChunkSize, Pos]),
     {ok, Data, _} = gen_server:call(Fd, {pread, Pos, ChunkSize}),
-    Nodes = read_data(Fd, Data, 0, Pos, []),
+    AccOut = read_data(Fd, Data, 0, Pos, Acc),
     if Pos == 0 ->
-        lists:append([Nodes | Acc]);
+        AccOut;
     true ->
-        read_file(Fd, Pos, [Nodes | Acc])
+        read_file(Fd, Pos, AccOut)
     end.
 
 read_data(Fd, Data, Pos, Offset, Acc0) when Pos < byte_size(Data) ->
@@ -238,12 +237,12 @@ read_data(Fd, Data, Pos, Offset, Acc0) when Pos < byte_size(Data) ->
 read_data(_Fd, _Data, _Pos, _Offset, AccOut) ->
     AccOut.
 
-node_acc(Fd, Pos, Acc, Retry) when Pos >= 0 ->
+node_acc(Fd, Pos, {Positions, ChildCount} = Acc, Retry) when Pos >= 0 ->
     case couch_file:pread_term(Fd, Pos) of
     {ok, {_, [{<<"_local/",_/binary>>,_}|_]}} ->
         Acc;
-    {ok, {kv_node, [{<<_/binary>>,_}|_]}} ->
-        [Pos | Acc];
+    {ok, {kv_node, [{<<_/binary>>,_}|_] = Children}} ->
+        {[Pos | Positions], ChildCount + length(Children)};
     {ok, _} ->
         Acc;
     _Error ->
