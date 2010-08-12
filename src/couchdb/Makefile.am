@@ -36,7 +36,6 @@ source_files = \
     couch_config_writer.erl \
     couch_db.erl \
     couch_db_repair.erl \
-    couch_db_repair_b.erl \
     couch_db_update_notifier.erl \
     couch_db_update_notifier_sup.erl \
     couch_doc.erl \
@@ -97,7 +96,6 @@ compiled_files = \
     couch_config_writer.beam \
     couch_db.beam \
     couch_db_repair.beam \
-    couch_db_repair_b.beam \
     couch_db_update_notifier.beam \
     couch_db_update_notifier_sup.beam \
     couch_doc.beam \
