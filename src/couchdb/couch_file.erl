@@ -27,6 +27,8 @@
 -export([append_term/2, pread_term/2, pread_iolist/2, write_header/2]).
 -export([pread_binary/2, read_header/1, truncate/2, upgrade_old_header/2]).
 -export([append_term_md5/2,append_binary_md5/2]).
+-export([append_term/3, append_term_md5/3]).
+-export([append_binary/3, append_binary_md5/3]).
 -export([init/1, terminate/2, handle_call/3, handle_cast/2, code_change/3, handle_info/2]).
 -export([delete/2,delete/3,init_delete_dir/1]).
 
@@ -69,11 +71,16 @@ open(Filepath, Options) ->
 %%----------------------------------------------------------------------
 
 append_term(Fd, Term) ->
-    append_binary(Fd, term_to_binary(Term)).
+    append_term(Fd, Term, false).
     
 append_term_md5(Fd, Term) ->
-    append_binary_md5(Fd, term_to_binary(Term)).
+    append_term_md5(Fd, Term, false).
 
+append_term(Fd, Term, Async) ->
+    append_binary(Fd, term_to_binary(Term), Async).
+
+append_term_md5(Fd, Term, Async) ->
+    append_binary_md5(Fd, term_to_binary(Term), Async).
 
 %%----------------------------------------------------------------------
 %% Purpose: To append an Erlang binary to the end of the file.
@@ -84,14 +91,29 @@ append_term_md5(Fd, Term) ->
 %%----------------------------------------------------------------------
 
 append_binary(Fd, Bin) ->
+    append_binary(Fd, Bin, false).
+
+append_binary(Fd, Bin, Async) ->
     Size = iolist_size(Bin),
-    gen_server:call(Fd, {append_bin,
-            [<<0:1/integer,Size:31/integer>>, Bin]}, infinity).
-    
+    do_append_binary(Fd,
+            [<<0:1/integer,Size:31/integer>>, Bin],
+            Async).
+
 append_binary_md5(Fd, Bin) ->
+    append_binary_md5(Fd, Bin, false).
+
+append_binary_md5(Fd, Bin, Async) ->
     Size = iolist_size(Bin),
-    gen_server:call(Fd, {append_bin,
-            [<<1:1/integer,Size:31/integer>>, couch_util:md5(Bin), Bin]}, infinity).
+    do_append_binary(Fd,
+            [<<1:1/integer,Size:31/integer>>, couch_util:md5(Bin), Bin],
+            Async).
+
+do_append_binary(Fd, Bin, true) ->
+    Ref = make_ref(),
+    Fd ! {append_bin_async, {self(), Ref}, Bin},
+    Ref;
+do_append_binary(Fd, Bin, false) ->
+    gen_server:call(Fd, {append_bin, Bin}, infinity).
 
 
 %%----------------------------------------------------------------------
@@ -324,12 +346,10 @@ handle_call({truncate, Pos}, _From, #file{fd=Fd}=File) ->
         {reply, Error, File}
     end;
 handle_call({append_bin, Bin}, _From, #file{fd=Fd, eof=Pos}=File) ->
-    Blocks = make_blocks(Pos rem ?SIZE_BLOCK, Bin),
-    case file:write(Fd, Blocks) of
-    ok ->
-        {reply, {ok, Pos}, File#file{eof=Pos+iolist_size(Blocks)}};
-    Error ->
-        {reply, Error, File}
+    try
+    {[Pos], NewPos} = append_bins_int([Bin], Fd, Pos),
+    {reply, {ok, Pos}, File#file{eof=NewPos}}
+    catch throw:Error -> {reply, Error, File}
     end;
 handle_call({write_header, Bin}, _From, #file{fd=Fd, eof=Pos}=File) ->
     BinSize = size(Bin),
@@ -479,6 +499,17 @@ handle_cast(close, Fd) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+
+handle_info({append_bin_async, {FromPid, Tag}=From, Bin}, File) ->
+    case handle_call({append_bin, Bin}, From, File) of
+    {reply, {ok, Pos}, File2} ->
+        FromPid ! {append_bin_result, {self(), Tag}, {ok, Pos}},
+        {noreply, File2};
+    {reply, Error, File} ->
+        FromPid ! {append_bin_result, {self(), Tag}, Error},
+        {noreply, File}
+    end;
+
 handle_info({'EXIT', _, normal}, Fd) ->
     {noreply, Fd};
 handle_info({'EXIT', _, Reason}, Fd) ->
@@ -586,3 +617,17 @@ split_iolist([Sublist| Rest], SplitAt, BeginAcc) when is_list(Sublist) ->
     end;
 split_iolist([Byte | Rest], SplitAt, BeginAcc) when is_integer(Byte) ->
     split_iolist(Rest, SplitAt - 1, [Byte | BeginAcc]).
+
+append_bins_int(Bins, Fd, Pos) ->
+    {BlockPosList, NewPos} = lists:mapfoldl(
+        fun(Bin, OutPos) ->
+            Blocks = make_blocks(OutPos rem ?SIZE_BLOCK, Bin),
+            {{Blocks, OutPos}, OutPos+iolist_size(Blocks)}
+        end, Pos, Bins),
+    {BlockList, PosList} = lists:unzip(BlockPosList),
+    case file:write(Fd, BlockList) of
+    ok ->
+        {PosList, NewPos};
+    Error ->
+        throw(Error)
+    end.

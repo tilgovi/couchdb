@@ -439,49 +439,67 @@ refresh_validate_doc_funs(Db) ->
 
 % rev tree functions
 
-flush_trees(_Db, [], AccFlushedTrees) ->
-    {ok, lists:reverse(AccFlushedTrees)};
-flush_trees(#db{fd=Fd,header=Header}=Db,
-        [InfoUnflushed | RestUnflushed], AccFlushed) ->
-    #full_doc_info{update_seq=UpdateSeq, rev_tree=Unflushed} = InfoUnflushed,
-    Flushed = couch_key_tree:map(
-        fun(_Rev, Value) ->
+flush_result(FlushRef) ->
+    receive
+    {append_bin_result, {_, FlushRef}, {ok, NewSummaryPointer}} ->
+        NewSummaryPointer;
+    {append_bin_result, {_, FlushRef}, Error} ->
+        exit(Error);
+    {'DOWN', _, _, _, normal} ->
+        flush_result(FlushRef);
+    {'DOWN', _, _, _, Reason} ->
+        exit(Reason)
+    end.
+
+flush_trees(_Db, [], AccDocInfo, []) ->
+    {ok, lists:reverse(AccDocInfo)};
+flush_trees(_Db, [], AccDocInfo, AccFlushRefs) ->
+    {Flushed, []} =
+    lists:foldl(
+        fun(#full_doc_info{update_seq=UpdateSeq, rev_tree=RevTree}=DocInfo,
+                {Acc, FlushRefs}) ->
+            {FlushedTree, FlushRefs2} =
+            couch_key_tree:mapfoldl(
+                fun(_Rev, Value, FlushRefs3) ->
+                    case Value of
+                    #doc{deleted=IsDeleted} ->
+                        [Ref|Rest] = FlushRefs3,
+                        {{IsDeleted, flush_result(Ref), UpdateSeq}, Rest};
+                    _ ->
+                        {Value, FlushRefs3}
+                    end
+                end, FlushRefs, RevTree),
+            {[DocInfo#full_doc_info{rev_tree=FlushedTree}|Acc], FlushRefs2}
+        end, {[], AccFlushRefs}, AccDocInfo),
+    {ok, Flushed};
+flush_trees(#db{fd=Fd,header=Header}=Db, [InfoUnflushed | RestUnflushed],
+        AccDocInfo, AccFlushRefs) ->
+    #full_doc_info{rev_tree=RevTree} = InfoUnflushed,
+    AccFlushRefs2 = couch_key_tree:foldl(
+        fun(_Rev, Value, Acc) ->
             case Value of
-            #doc{atts=Atts,deleted=IsDeleted}=Doc ->
+            #doc{body={BinFd, _, _}} when BinFd /= Fd ->
+                % BinFd must not equal our Fd. This can happen when a database
+                % is being switched out during a compaction
+                ?LOG_DEBUG("File where the attachments are written has"
+                        " changed. Possibly retrying.", []),
+                throw(retry);
+            #doc{body={Fd, BodyBin}} ->
                 % this node value is actually an unwritten document summary,
                 % write to disk.
-                % make sure the Fd in the written bins is the same Fd we are
-                % and convert bins, removing the FD.
-                % All bins should have been written to disk already.
-                DiskAtts =
-                case Atts of
-                [] -> [];
-                [#att{data={BinFd, _Sp}} | _ ] when BinFd == Fd ->
-                    [{N,T,P,AL,DL,R,M,E}
-                        || #att{name=N,type=T,data={_,P},md5=M,revpos=R,
-                               att_len=AL,disk_len=DL,encoding=E}
-                        <- Atts];
-                _ ->
-                    % BinFd must not equal our Fd. This can happen when a database
-                    % is being switched out during a compaction
-                    ?LOG_DEBUG("File where the attachments are written has"
-                            " changed. Possibly retrying.", []),
-                    throw(retry)
-                end,
-                {ok, NewSummaryPointer} =
+                FlushRef =
                 case Header#db_header.disk_version < 4 of
                 true ->
-                    couch_file:append_term(Fd, {Doc#doc.body, DiskAtts});
+                    couch_file:append_binary(Fd, BodyBin, true);
                 false ->
-                    couch_file:append_term_md5(Fd, {Doc#doc.body, DiskAtts})
+                    couch_file:append_binary_md5(Fd, BodyBin, true)
                 end,
-                {IsDeleted, NewSummaryPointer, UpdateSeq};
+                [FlushRef|Acc];
             _ ->
-                Value
+                Acc
             end
-        end, Unflushed),
-    flush_trees(Db, RestUnflushed, [InfoUnflushed#full_doc_info{rev_tree=Flushed} | AccFlushed]).
-
+        end, AccFlushRefs, RevTree),
+    flush_trees(Db, RestUnflushed, [InfoUnflushed | AccDocInfo], AccFlushRefs2).
 
 send_result(Client, Id, OriginalRevs, NewResult) ->
     % used to send a result to the client
@@ -605,7 +623,7 @@ update_docs_int(Db, DocsList, NonRepDocs, MergeConflicts, FullCommit) ->
 
     % Write out the document summaries (the bodies are stored in the nodes of
     % the trees, the attachments are already written to disk)
-    {ok, FlushedFullDocInfos} = flush_trees(Db2, NewFullDocInfos, []),
+    {ok, FlushedFullDocInfos} = flush_trees(Db2, NewFullDocInfos, [], []),
 
     {IndexFullDocInfos, IndexDocInfos} =
             new_index_entries(FlushedFullDocInfos, [], []),

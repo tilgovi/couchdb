@@ -793,7 +793,17 @@ set_new_att_revpos(#doc{revs={RevPos,_Revs},atts=Atts}=Doc) ->
         end, Atts)}.
 
 doc_flush_prep(Doc, BinFd) ->
-    Doc.
+    DiskAtts = 
+    case Doc#doc.atts of
+    [] -> [];
+    Atts ->
+        [{N,T,P,AL,DL,R,M,E}
+            || #att{name=N,type=T,data={_,P},md5=M,revpos=R,
+                   att_len=AL,disk_len=DL,encoding=E}
+            <- Atts]
+    end,
+    DiskBin = term_to_binary({Doc#doc.body, DiskAtts}),
+    Doc#doc{atts=DiskAtts, body={BinFd, DiskBin}}.
 
 doc_flush_atts(Doc, Fd) ->
     Doc#doc{atts=[flush_att(Fd, Att) || Att <- Doc#doc.atts]}.
