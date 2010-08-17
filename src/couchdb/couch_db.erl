@@ -755,21 +755,22 @@ collect_results(UpdatePid, MRef, ResultsAcc) ->
         exit(Reason)
     end.
 
-write_and_commit(#db{update_pid=UpdatePid, user_ctx=Ctx}=Db, DocBuckets,
+write_and_commit(#db{update_pid=UpdatePid, fd=Fd, user_ctx=Ctx}=Db, DocBuckets0,
         NonRepDocs, Options0) ->
     Options = set_commit_option(Options0),
     MergeConflicts = lists:member(merge_conflicts, Options),
     FullCommit = lists:member(full_commit, Options),
     MRef = erlang:monitor(process, UpdatePid),
+    DocBuckets1 = [[doc_flush_prep(Doc, Fd) || Doc <- Bucket] || Bucket <- DocBuckets0],
     try
-        UpdatePid ! {update_docs, self(), DocBuckets, NonRepDocs, MergeConflicts, FullCommit},
+        UpdatePid ! {update_docs, self(), DocBuckets1, NonRepDocs, MergeConflicts, FullCommit},
         case collect_results(UpdatePid, MRef, []) of
         {ok, Results} -> {ok, Results};
         retry ->
             % This can happen if the db file we wrote to was swapped out by
             % compaction. Retry by reopening the db and writing to the current file
             {ok, Db2} = open_ref_counted(Db#db.main_pid, Ctx),
-            DocBuckets2 = [[doc_flush_atts(Doc, Db2#db.fd) || Doc <- Bucket] || Bucket <- DocBuckets],
+            DocBuckets2 = [[doc_flush_prep(Doc, Db2#db.fd) || Doc <- Bucket] || Bucket <- DocBuckets0],
             % We only retry once
             close(Db2),
             UpdatePid ! {update_docs, self(), DocBuckets2, NonRepDocs, MergeConflicts, FullCommit},
@@ -790,7 +791,9 @@ set_new_att_revpos(#doc{revs={RevPos,_Revs},atts=Atts}=Doc) ->
         (Att) ->
             Att#att{revpos=RevPos+1}
         end, Atts)}.
-        
+
+doc_flush_prep(Doc, BinFd) ->
+    Doc.
 
 doc_flush_atts(Doc, Fd) ->
     Doc#doc{atts=[flush_att(Fd, Att) || Att <- Doc#doc.atts]}.
