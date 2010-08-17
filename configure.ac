@@ -235,6 +235,20 @@ case "$(uname -s)" in
   ;;
 esac
 
+AC_ARG_WITH([judy], [AC_HELP_STRING([--with-judy=PATH],
+    [set PATH to the prefix of Judy installation])], [
+    JUDY_CFLAGS="-I$withval/include"
+    JUDY_LIBS="$withval/lib/libJudy"
+    JUDY_LDFLAGS="-l$JUDY_LIBS"
+], [
+    AC_CHECK_LIB([Judy], [JudyHSIns], [JUDY_LDFLAGS="-lJudy"],
+        [AC_MSG_ERROR([Could not find the judy library. Is Judy installed?])])
+])
+
+AC_SUBST(JUDY_CFLAGS)
+AC_SUBST(JUDY_LIBS)
+AC_SUBST(JUDY_LDFLAGS)
+
 AC_PATH_PROG([ERL], [erl])
 
 if test x${ERL} = x; then
@@ -270,6 +284,11 @@ AC_CHECK_HEADER([erl_driver.h], [], [
 
 Are the Erlang headers installed? Use the `--with-erlang' option to specify the
 path to the Erlang include directory.])])
+
+AC_ERLANG_CHECK_LIB([erl_interface],
+    [],
+    [AC_MSG_ERROR([erl_interface was not found!])])
+AC_SUBST(ERL_LIB_DIR_erl_interface)
 
 AC_PATH_PROG([HELP2MAN_EXECUTABLE], [help2man])
 if test x${HELP2MAN_EXECUTABLE} = x; then
@@ -395,6 +414,8 @@ AC_CONFIG_FILES([etc/windows/Makefile])
 AC_CONFIG_FILES([etc/Makefile])
 AC_CONFIG_FILES([share/Makefile])
 AC_CONFIG_FILES([src/Makefile])
+AC_CONFIG_FILES([src/cherly/Makefile])
+AC_CONFIG_FILES([src/cherly/priv/Makefile])
 AC_CONFIG_FILES([src/couchdb/couch.app.tpl])
 AC_CONFIG_FILES([src/couchdb/Makefile])
 AC_CONFIG_FILES([src/couchdb/priv/Makefile])

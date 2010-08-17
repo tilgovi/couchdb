@@ -24,6 +24,7 @@ run: ../bin/couchdb.tpl
 	    -e "s|%defaultini%|default_dev.ini|g" \
 	    -e "s|%localini%|local_dev.ini|g" \
 	    -e "s|%localerlanglibdir%|foo \
+			-pa $(abs_top_builddir)\/src\/cherly \
 			-pa $(abs_top_builddir)\/src\/couchdb \
 			-pa $(abs_top_builddir)\/src\/erlang-oauth \
 			-pa $(abs_top_builddir)\/src\/ibrowse \

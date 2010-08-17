@@ -1,0 +1,8 @@
+{application, cherly,
+  [{description, "Cherly caching library"},
+   {mod, {cherly_app, []}},
+   {vsn, "d0bd62"},
+   {modules, [cherly, cherly_app]},
+   {registered, []},
+   {applications, [kernel, stdlib]}
+  ]}.

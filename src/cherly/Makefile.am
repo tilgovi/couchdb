@@ -10,4 +10,32 @@
 ## License for the specific language governing permissions and limitations under
 ## the License.
 
-SUBDIRS = cherly couchdb erlang-oauth etap ibrowse mochiweb
+SUBDIRS = priv
+
+cherlyebindir = $(localerlanglibdir)/cherly-d0bd62/ebin
+cherlybindir = $(cherlylibdir)/ebin
+
+source_files = \
+    cherly.app.in \
+    cherly_app.erl \
+    cherly.erl
+
+compiled_files = \
+    cherly.app \
+    cherly_app.beam \
+    cherly.beam
+
+cherlyebin_DATA = \
+    $(compiled_files)
+
+EXTRA_DIST =  \
+    $(source_files)
+
+CLEANFILES = \
+    $(compiled_files)
+
+%.app: %.app.in
+	cp $< $@
+
+%.beam: %.erl
+	$(ERLC) $(ERLC_FLAGS) $<
