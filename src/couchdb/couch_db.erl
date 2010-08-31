@@ -645,7 +645,7 @@ update_docs(Db, Docs, Options, replicated_changes) ->
         DocErrors = [],
         DocBuckets3 = DocBuckets
     end,
-    DocBuckets4 = [[doc_flush_atts(check_dup_atts(Doc), Db#db.fd)
+    DocBuckets4 = [[check_dup_atts(Doc)
             || Doc <- Bucket] || Bucket <- DocBuckets3],
     {ok, []} = write_and_commit(Db, DocBuckets4, [], [merge_conflicts | Options]),
     {ok, DocErrors};
@@ -700,8 +700,8 @@ update_docs(Db, Docs, Options, interactive_edit) ->
         Options2 = if AllOrNothing -> [merge_conflicts];
                 true -> [] end ++ Options,
         DocBuckets3 = [[
-                doc_flush_atts(set_new_att_revpos(
-                        check_dup_atts(Doc)), Db#db.fd)
+                set_new_att_revpos(
+                        check_dup_atts(Doc))
                 || Doc <- B] || B <- DocBuckets2],
         {DocBuckets4, IdRevs} = new_revs(DocBuckets3, [], []),
         
@@ -793,7 +793,18 @@ set_new_att_revpos(#doc{revs={RevPos,_Revs},atts=Atts}=Doc) ->
         end, Atts)}.
 
 doc_flush_prep(Doc, BinFd) ->
-    Doc.
+    Doc2 = doc_flush_atts(Doc, BinFd),
+    DiskAtts = 
+    case Doc2#doc.atts of
+    [] -> [];
+    Atts ->
+        [{N,T,P,AL,DL,R,M,E}
+            || #att{name=N,type=T,data={_,P},md5=M,revpos=R,
+                   att_len=AL,disk_len=DL,encoding=E}
+            <- Atts]
+    end,
+    DiskBin = term_to_binary({Doc2#doc.body, DiskAtts}),
+    Doc#doc{atts=DiskAtts, body={BinFd, DiskBin}}.
 
 doc_flush_atts(Doc, Fd) ->
     Doc#doc{atts=[flush_att(Fd, Att) || Att <- Doc#doc.atts]}.
