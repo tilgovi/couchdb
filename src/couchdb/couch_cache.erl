@@ -55,8 +55,9 @@ handle_call({get, Key}, _From, Cache) ->
         {reply, {error, not_found}, Cache};
     Value ->
         {reply, {ok, Value}, Cache}
+    end;
 handle_call({put, Key, Val}, _From, Cache) ->
-    {reply, {ok, put(Key, Val), Cache}}.
+    {reply, {ok, put(Key, Val)}, Cache}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
