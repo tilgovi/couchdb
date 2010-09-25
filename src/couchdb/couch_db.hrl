@@ -295,3 +295,11 @@
     db_open_options = []
 }).
 
+-record(daemon, {
+    port,
+    name,
+    cmd,
+    kill,
+    errors=[],
+    buf=[]
+}).
