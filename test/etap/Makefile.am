@@ -11,7 +11,7 @@
 ## the License.
 
 noinst_SCRIPTS = run
-noinst_DATA = test_util.beam
+noinst_DATA = test_util.beam test_web.beam
 
 %.beam: %.erl
 	$(ERLC) $<
@@ -27,6 +27,7 @@ DISTCLEANFILES = temp.*
 
 EXTRA_DIST = \
 	run.tpl \
+	test_web.erl \
     001-load.t \
     002-icu-driver.t \
     010-file-basics.t \
