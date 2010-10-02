@@ -15,8 +15,13 @@
 % Please do not make this file executable as that's the error being tested.
 
 loop() ->
-    timer:sleep(5000),
-    loop().
+    loop(io:read("")).
+loop({ok, _}) ->
+    loop(io:read(""));
+loop(eof) ->
+    ok;
+loop(Error) ->
+    Error.
 
 main([]) ->
     loop().

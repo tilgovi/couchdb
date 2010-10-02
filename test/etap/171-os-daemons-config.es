@@ -51,8 +51,13 @@ test_log() ->
     log(<<"foobar!">>).
 
 loop() ->
-    timer:sleep(5000),
-    loop().
+    loop(io:read("")).
+loop({ok, _}) ->
+    loop(io:read(""));
+loop(eof) ->
+    ok;
+loop(Error) ->
+    Error.
 
 do_tests() ->
     test_get_cfg1(),
