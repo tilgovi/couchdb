@@ -42,10 +42,10 @@ add(RefCounterPid, Pid) ->
     case
     catch ets:update_counter(couch_ref_counter, {RefCounterPid, Pid}, 1) of
     1 ->
-        gen_server:cast(RefCounterPid, {add, Pid});
+        ets:update_counter(couch_ref_counter, {total, RefCounterPid}, 1);
     {'EXIT', _} ->
-        ets:update_counter(couch_ref_counter, {total, RefCounterPid}, 1),
         ets:insert_new(couch_ref_counter, {{RefCounterPid, Pid}, 0}),
+        gen_server:cast(RefCounterPid, {add, Pid}),
         add(RefCounterPid, Pid);
     _ ->
         ok
@@ -83,21 +83,21 @@ handle_call(Msg, _From, Srv) ->
 
 handle_cast({add, Pid}, Srv) ->
     case ets:lookup(couch_ref_counter, {self(), Pid}) of
-    [0] ->
-        ok;
-    _ ->
+    [N] when N > 0 ->
         case ets:lookup(couch_ref_counter, {monitor, self(), Pid}) of
         [MonRef] ->
             ok;
         _ ->
             ets:insert_new(couch_ref_counter, {{monitor, self(), Pid},
                                                erlang:monitor(process, Pid)})
-        end
+        end;
+    _ ->
+        ok
     end,
     {noreply, Srv};
 handle_cast({drop, Pid}, Srv) ->
     case ets:lookup(couch_ref_counter, {self(), Pid}) of
-    [0] ->
+    [] ->
         MonRef =
             ets:lookup_element(couch_ref_counter, {monitor, self(), Pid}, 2),
         erlang:demonitor(MonRef, [flush]),
