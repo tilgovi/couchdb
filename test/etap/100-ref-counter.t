@@ -111,4 +111,12 @@ test() ->
         "The referer count was decremented automatically on process exit."
     ),
 
+    couch_ref_counter:drop(RefCtr),
+    Result = lists:fold(CheckFun, nil, lists:seq(1, 10000)),
+    etap:is(
+        ets:info(couch_ref_counter, size),
+        0,
+        "The couch_ref_counter table was cleaned up properly."
+    ),
+
     ok.
