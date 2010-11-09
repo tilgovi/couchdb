@@ -99,10 +99,13 @@ handle_cast({add, Pid}, Srv) ->
 handle_cast({drop, Pid}, Srv) ->
     case ets:lookup(couch_ref_counter, {self(), Pid}) of
     [] ->
-        MonRef =
-            ets:lookup_element(couch_ref_counter, {monitor, self(), Pid}, 2),
-        erlang:demonitor(MonRef, [flush]),
-        ets:delete(couch_ref_counter, {monitor, self(), Pid});
+        case ets:lookup(couch_ref_counter, {monitor, self(), Pid}) of
+        [{{monitor, _, _}, MonRef}] ->
+            erlang:demonitor(MonRef, [flush]),
+            ets:delete(couch_ref_counter, {monitor, self(), Pid});
+        _ ->
+            ok
+        end;
     _ ->
         ok
     end,
