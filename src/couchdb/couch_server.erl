@@ -380,6 +380,8 @@ code_change(_OldVsn, State, _Extra) ->
     
 handle_info({'EXIT', _Pid, config_change}, Server) ->
     {noreply, shutdown, Server};
+handle_info({'ETS-TRANSFER', couch_ref_counter, _, ok}, Server) ->
+    {noreply, Server};
 handle_info(Error, _Server) ->
     ?LOG_ERROR("Unexpected message, restarting couch_server: ~p", [Error]),
     exit(kill).
