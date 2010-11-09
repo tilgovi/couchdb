@@ -42,7 +42,8 @@ add(RefCounterPid, Pid) ->
     case
     catch ets:update_counter(couch_ref_counter, {RefCounterPid, Pid}, 1) of
     1 ->
-        ets:update_counter(couch_ref_counter, {total, RefCounterPid}, 1);
+        ets:update_counter(couch_ref_counter, {total, RefCounterPid}, 1),
+        ok;
     {'EXIT', _} ->
         ets:insert_new(couch_ref_counter, {{RefCounterPid, Pid}, 0}),
         gen_server:cast(RefCounterPid, {add, Pid}),
