@@ -53,13 +53,6 @@ add(RefCounterPid, Pid) ->
 
 count(RefCounterPid) ->
     ets:lookup_element(couch_ref_counter, {total, RefCounterPid}, 2).
-    %% ets:foldl(fun({total, _}, Acc) ->
-    %%                   Acc;
-    %%              ({{monitor, _}, _}, Acc) ->
-    %%                   Acc;
-    %%              (_, Acc) ->
-    %%                   Acc + 1
-    %%           end, 0, RefCounterTab).
 
 % server functions
 
@@ -80,6 +73,9 @@ init({Pid, ChildProcs}) ->
 
 terminate(_Reason, #srv{child_procs=ChildProcs}) ->
     [couch_util:shutdown_sync(Pid) || Pid <- ChildProcs],
+    ets:match_delete(couch_ref_counter, {{total, self()}, '$1'}),
+    ets:match_delete(couch_ref_counter, {{self(), '$1'}, '$2'}),
+    ets:match_delete(couch_ref_counter, {{monitor, self(), '$1'}, '$2'}),
     ok.
 
 handle_call(Msg, _From, Srv) ->
