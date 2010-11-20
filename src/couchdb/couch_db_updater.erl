@@ -709,14 +709,15 @@ commit_data(#db{waiting_delayed_commit=nil} = Db, true) ->
     Db#db{waiting_delayed_commit=erlang:send_after(1000,self(),delayed_commit)};
 commit_data(Db, true) ->
     Db;
-commit_data(Db, _) ->
+commit_data(Db0, _) ->
     #db{
         fd = Fd,
         filepath = Filepath,
         header = OldHeader,
         fsync_options = FsyncOptions,
         waiting_delayed_commit = Timer
-    } = Db,
+    } = Db0,
+    Db = flush(Db0),
     if is_reference(Timer) -> erlang:cancel_timer(Timer); true -> ok end,
     case db_to_header(Db, OldHeader) of
     OldHeader ->
@@ -739,6 +740,14 @@ commit_data(Db, _) ->
             committed_update_seq=Db#db.update_seq}
     end.
 
+flush(#db{
+        fulldocinfo_by_id_btree = FullDocInfoBTree,
+        docinfo_by_seq_btree = DocInfoBTree,
+        local_docs_btree = LocalDocsBTree}=Db) ->
+    Db#db{
+      fulldocinfo_by_id_btree = couch_btree:flush(FullDocInfoBTree),
+      docinfo_by_seq_btree = couch_btree:flush(DocInfoBTree),
+      local_docs_btree = couch_btree:flush(LocalDocsBTree)}.
 
 copy_doc_attachments(#db{fd=SrcFd}=SrcDb, {Pos,_RevId}, SrcSp, DestFd) ->
     {ok, {BodyData, BinInfos}} = couch_db:read_doc(SrcDb, SrcSp),

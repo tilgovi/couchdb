@@ -12,7 +12,7 @@
 
 -module(couch_btree).
 
--export([open/2, open/3, query_modify/4, add/2, add_remove/3]).
+-export([open/2, open/3, query_modify/4, add/2, add_remove/3, flush/1]).
 -export([fold/4, full_reduce/1, final_reduce/2, foldl/3, foldl/4]).
 -export([fold_reduce/4, lookup/2, get_state/1, set_options/2]).
 
@@ -260,6 +260,26 @@ complete_root(Bt, KPs) ->
     {ok, ResultKeyPointers, Bt2} = write_node(Bt, kp_node, KPs),
     complete_root(Bt2, ResultKeyPointers).
 
+flush(#btree{root=RootInfo}=Bt) ->
+    Bt2 = Bt#btree{root=flush_node(Bt, RootInfo)},
+    catch term_cache_trees:flush(Bt#btree.cache),
+    Bt2.
+
+flush_node(Bt, {Ref, Reduction}) when is_reference(Ref) ->
+    {ok, {NodeType, NodeList}} =
+        term_cache_trees:get(Bt#btree.cache, Ref),
+    FlushedNodeList =
+        lists:keymap(
+          fun
+              (PointerInfo) ->
+                  flush_node(Bt, PointerInfo)
+          end, 2, NodeList),
+    {ok, Pointer} =
+        couch_file:append_term(Bt#btree.fd, {NodeType, FlushedNodeList}),
+    {Pointer, Reduction};
+flush_node(_Bt, PointerInfo) ->
+    PointerInfo.
+
 %%%%%%%%%%%%% The chunkify function sucks! %%%%%%%%%%%%%
 % It is inaccurate as it does not account for compression when blocks are
 % written. Plus with the "case byte_size(term_to_binary(InList)) of" code
@@ -320,19 +340,18 @@ reduce_node(#btree{reduce=R}, kp_node, NodeList) ->
 reduce_node(#btree{reduce=R}=Bt, kv_node, NodeList) ->
     R(reduce, [assemble(Bt, K, V) || {K, V} <- NodeList]).
 
-
-get_node(#btree{fd = Fd, cache = nil}, NodePos) ->
-    {ok, {NodeType, NodeList}} = couch_file:pread_term(Fd, NodePos),
-    {NodeType, NodeList};
 get_node(#btree{fd = Fd, cache = Cache}, NodePos) when is_pid(Cache) ->
     case term_cache_trees:get(Cache, NodePos) of
     {ok, Node} ->
         Node;
     not_found ->
         {ok, {_Type, _NodeList} = Node} = couch_file:pread_term(Fd, NodePos),
-        ok = term_cache_trees:put(Cache, NodePos, Node),
+        %ok = term_cache_trees:put(Cache, NodePos, Node),
         Node
-    end.
+    end;
+get_node(#btree{fd = Fd}, NodePos) ->
+    {ok, {NodeType, NodeList}} = couch_file:pread_term(Fd, NodePos),
+    {NodeType, NodeList}.
 
 write_node(#btree{cache = Cache} = Bt, NodeType, NodeList) ->
     % split up nodes into smaller sizes
@@ -341,7 +360,7 @@ write_node(#btree{cache = Cache} = Bt, NodeType, NodeList) ->
     ResultList = [
         begin
             Node = {NodeType, ANodeList},
-            {ok, Pointer} = couch_file:append_term(Bt#btree.fd, Node),
+            Pointer = make_ref(),
             case Cache of
             Pid when is_pid(Pid) ->
                 ok = term_cache_trees:put(Cache, Pointer, Node);
