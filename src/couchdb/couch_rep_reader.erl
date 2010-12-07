@@ -53,8 +53,10 @@ init([Parent, Source, MissingRevs, _PostProps]) ->
     process_flag(trap_exit, true),
     if is_record(Source, http_db) ->
         #url{host=Host, port=Port} = ibrowse_lib:parse_url(Source#http_db.url),
-        ibrowse:set_max_sessions(Host, Port, ?MAX_CONNECTIONS),
-        ibrowse:set_max_pipeline_size(Host, Port, ?MAX_PIPELINE_SIZE);
+        ibrowse:set_max_sessions(Host, Port,
+            proplists:get_value(max_sessions, Source#http_db.options, ?MAX_CONNECTIONS)),
+        ibrowse:set_max_pipeline_size(Host, Port,
+            proplists:get_value(max_pipeline_size, Source#http_db.options, ?MAX_PIPELINE_SIZE));
     true -> ok end,
     Self = self(),
     ReaderLoop = spawn_link(fun() -> reader_loop(Self, Source, MissingRevs) end),
