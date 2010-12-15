@@ -27,6 +27,7 @@
 -define(DOC_BUFFER_BYTE_SIZE, 1024 * 1024). % for remote targets
 -define(DOC_BUFFER_LEN, 100).               % for local targets, # of documents
 -define(MAX_BULK_ATT_SIZE, 64 * 1024).
+-define(MAX_BULK_ATTS_PER_DOC, 8).
 
 -record(state, {
     loop,
@@ -291,9 +292,10 @@ maybe_flush_docs(Doc, #state{target = Target, docs = DocAcc,
     }.
 
 
-maybe_flush_docs(#httpdb{} = Target, DocAcc, SizeAcc, Doc) ->
-    case lists:any(
-        fun(Att) -> Att#att.disk_len > ?MAX_BULK_ATT_SIZE end, Doc#doc.atts) of
+maybe_flush_docs(#httpdb{} = Target, DocAcc, SizeAcc, #doc{atts = Atts} = Doc) ->
+    case (length(Atts) > ?MAX_BULK_ATTS_PER_DOC) orelse
+        lists:any(
+            fun(A) -> A#att.disk_len > ?MAX_BULK_ATT_SIZE end, Atts) of
     true ->
         {Written, Failed} = flush_docs(Target, Doc),
         {DocAcc, SizeAcc, Written, Failed};
