@@ -17,6 +17,9 @@
 -define(MIN_STR, <<"">>).
 -define(MAX_STR, <<255>>). % illegal utf string
 
+% the lowest possible database sequence number
+-define(LOWEST_SEQ, 0).
+
 -define(JSON_ENCODE(V), couch_util:json_encode(V)).
 -define(JSON_DECODE(V), couch_util:json_decode(V)).
 
@@ -259,33 +262,6 @@
     view_states=nil
     }).
 
--record(http_db, {
-    url,
-    auth = [],
-    resource = "",
-    headers = [
-        {"User-Agent", "CouchDB/"++couch_server:get_version()},
-        {"Accept", "application/json"},
-        {"Accept-Encoding", "gzip"}
-    ],
-    qs = [],
-    method = get,
-    body = nil,
-    options = [
-        {response_format,binary},
-        {inactivity_timeout, 30000},
-        {max_sessions, list_to_integer(
-            couch_config:get("replicator", "max_http_sessions", "10")
-        )},
-        {max_pipeline_size, list_to_integer(
-            couch_config:get("replicator", "max_http_pipeline_size", "10")
-        )}
-    ],
-    retries = 10,
-    pause = 500,
-    conn = nil
-}).
-
 % small value used in revision trees to indicate the revision isn't stored
 -define(REV_MISSING, []).
 
@@ -309,4 +285,21 @@
     assemble_kv = fun(Key, Value) -> {Key, Value} end,
     less = fun(A, B) -> A < B end,
     reduce = nil
+}).
+
+-record(rep, {
+    id,
+    source,
+    target,
+    options,
+    user_ctx,
+    doc
+}).
+
+-record(rep_stats, {
+    missing_checked = 0,
+    missing_found = 0,
+    docs_read = 0,
+    docs_written = 0,
+    doc_write_failures = 0
 }).

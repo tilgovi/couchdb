@@ -70,7 +70,7 @@ _utils = {couch_httpd_misc_handlers, handle_utils_dir_req, "%localdatadir%/www"}
 _all_dbs = {couch_httpd_misc_handlers, handle_all_dbs_req}
 _active_tasks = {couch_httpd_misc_handlers, handle_task_status_req}
 _config = {couch_httpd_misc_handlers, handle_config_req}
-_replicate = {couch_httpd_misc_handlers, handle_replicate_req}
+_replicate = {couch_httpd_replicator, handle_req}
 _uuids = {couch_httpd_misc_handlers, handle_uuids_req}
 _restart = {couch_httpd_misc_handlers, handle_restart_req}
 _stats = {couch_httpd_stats_handlers, handle_stats_req}
@@ -134,9 +134,9 @@ compression_level = 8 ; from 1 (lowest, fastest) to 9 (highest, slowest), 0 to d
 compressible_types = text/*, application/javascript, application/json,  application/xml
 
 [replicator]
+worker_processes = 8
+worker_batch_size = 1000
 db = _replicator
-max_http_sessions = 10
-max_http_pipeline_size = 10
 ; set to true to validate peer certificates
 verify_ssl_certificates = false
 ; file containing a list of peer trusted certificates (PEM format)

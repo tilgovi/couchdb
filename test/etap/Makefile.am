@@ -56,10 +56,6 @@ EXTRA_DIST = \
     083-config-no-files.t \
     090-task-status.t \
     100-ref-counter.t \
-    110-replication-httpc.t \
-    111-replication-changes-feed.t \
-    112-replication-missing-revs.t \
-    113-replication-attachment-comp.t \
     120-stats-collect.t \
     121-stats-aggregates.cfg \
     121-stats-aggregates.ini \

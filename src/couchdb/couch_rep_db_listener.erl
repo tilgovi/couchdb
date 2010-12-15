@@ -21,6 +21,15 @@
 -define(DOC_TO_REP_ID_MAP, rep_doc_id_to_rep_id).
 -define(REP_ID_TO_DOC_ID_MAP, rep_id_to_rep_doc_id).
 
+-import(couch_replicator_utils, [
+    parse_rep_doc/2,
+    update_rep_doc/2
+]).
+-import(couch_util, [
+    get_value/2,
+    get_value/3
+]).
+
 -record(state, {
     changes_feed_loop = nil,
     changes_queue = nil,
@@ -109,7 +118,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 changes_feed_loop(ChangesQueue) ->
-    {ok, RepDb} = couch_rep:ensure_rep_db_exists(),
+    {ok, RepDb} = couch_replicator_utils:ensure_rep_db_exists(),
     Pid = spawn_link(
         fun() ->
             ChangesFeedFun = couch_changes:handle_changes(
@@ -181,7 +190,7 @@ consume_changes(ChangesQueue) ->
 
 
 has_valid_rep_id({Change}) ->
-    has_valid_rep_id(couch_util:get_value(<<"id">>, Change));
+    has_valid_rep_id(get_value(<<"id">>, Change));
 has_valid_rep_id(<<?DESIGN_DOC_PREFIX, _Rest/binary>>) ->
     false;
 has_valid_rep_id(_Else) ->
@@ -193,13 +202,13 @@ process_change(stop_all_replications) ->
     stop_all_replications();
 
 process_change({Change}) ->
-    {RepProps} = JsonRepDoc = couch_util:get_value(doc, Change),
-    DocId = couch_util:get_value(<<"_id">>, RepProps),
-    case couch_util:get_value(<<"deleted">>, Change, false) of
+    {RepProps} = JsonRepDoc = get_value(doc, Change),
+    DocId = get_value(<<"_id">>, RepProps),
+    case get_value(<<"deleted">>, Change, false) of
     true ->
         rep_doc_deleted(DocId);
     false ->
-        case couch_util:get_value(<<"_replication_state">>, RepProps) of
+        case get_value(<<"_replication_state">>, RepProps) of
         <<"completed">> ->
             replication_complete(DocId);
         <<"error">> ->
@@ -217,25 +226,26 @@ process_change({Change}) ->
 
 
 rep_user_ctx({RepDoc}) ->
-    case couch_util:get_value(<<"user_ctx">>, RepDoc) of
+    case get_value(<<"user_ctx">>, RepDoc) of
     undefined ->
         #user_ctx{roles = [<<"_admin">>]};
     {UserCtx} ->
         #user_ctx{
-            name = couch_util:get_value(<<"name">>, UserCtx, null),
-            roles = couch_util:get_value(<<"roles">>, UserCtx, [])
+            name = get_value(<<"name">>, UserCtx, null),
+            roles = get_value(<<"roles">>, UserCtx, [])
         }
     end.
 
 
 maybe_start_replication(DocId, JsonRepDoc) ->
     UserCtx = rep_user_ctx(JsonRepDoc),
-    {BaseId, _} = RepId = couch_rep:make_replication_id(JsonRepDoc, UserCtx),
+    {ok, #rep{id = {BaseId, _} = RepId} = Rep} =
+        parse_rep_doc(JsonRepDoc, UserCtx),
     case ets:lookup(?REP_ID_TO_DOC_ID_MAP, BaseId) of
     [] ->
         true = ets:insert(?REP_ID_TO_DOC_ID_MAP, {BaseId, DocId}),
         true = ets:insert(?DOC_TO_REP_ID_MAP, {DocId, RepId}),
-        spawn_link(fun() -> start_replication(JsonRepDoc, RepId, UserCtx) end);
+        start_replication(Rep);
     [{BaseId, DocId}] ->
         ok;
     [{BaseId, OtherDocId}] ->
@@ -244,25 +254,24 @@ maybe_start_replication(DocId, JsonRepDoc) ->
 
 
 maybe_tag_rep_doc(DocId, {Props} = JsonRepDoc, RepId, OtherDocId) ->
-    case couch_util:get_value(<<"_replication_id">>, Props) of
+    case get_value(<<"_replication_id">>, Props) of
     RepId ->
         ok;
     _ ->
         ?LOG_INFO("The replication specified by the document `~s` was already"
             " triggered by the document `~s`", [DocId, OtherDocId]),
-        couch_rep:update_rep_doc(JsonRepDoc, [{<<"_replication_id">>, RepId}])
+        update_rep_doc(JsonRepDoc, [{<<"_replication_id">>, RepId}])
     end.
 
 
 
-start_replication({RepProps} = RepDoc, {Base, Ext} = RepId, UserCtx) ->
-    case (catch couch_rep:start_replication(RepDoc, RepId, UserCtx)) of
-    RepPid when is_pid(RepPid) ->
+start_replication(#rep{id = {Base, Ext}, doc = {RepProps} = RepDoc} = Rep) ->
+    case (catch couch_replicator:async_replicate(Rep)) of
+    {ok, _} ->
         ?LOG_INFO("Document `~s` triggered replication `~s`",
-            [couch_util:get_value(<<"_id">>, RepProps), Base ++ Ext]),
-        couch_rep:get_result(RepPid, RepId, RepDoc, UserCtx);
+            [get_value(<<"_id">>, RepProps), Base ++ Ext]);
     Error ->
-        couch_rep:update_rep_doc(
+        update_rep_doc(
             RepDoc,
             [
                 {<<"_replication_state">>, <<"error">>},
@@ -293,7 +302,7 @@ replication_complete(DocId) ->
 stop_replication(DocId) ->
     case ets:lookup(?DOC_TO_REP_ID_MAP, DocId) of
     [{DocId, {BaseId, _} = RepId}] ->
-        couch_rep:end_replication(RepId),
+        couch_replicator:end_replication(RepId),
         true = ets:delete(?REP_ID_TO_DOC_ID_MAP, BaseId),
         true = ets:delete(?DOC_TO_REP_ID_MAP, DocId),
         {ok, RepId};
@@ -303,7 +312,7 @@ stop_replication(DocId) ->
 
 stop_all_replications() ->
     ets:foldl(
-        fun({_, RepId}, _) -> couch_rep:end_replication(RepId) end,
+        fun({_, RepId}, _) -> couch_replicator:end_replication(RepId) end,
         ok,
         ?DOC_TO_REP_ID_MAP
     ),

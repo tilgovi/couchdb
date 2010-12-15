@@ -734,14 +734,16 @@ send_doc_efficiently(#httpd{mochi_req = MochiReq} = Req,
             send_json(Req, 200, Headers, couch_doc:to_json_obj(Doc, Options));
         true ->
             Boundary = couch_uuids:random(),
+            CompressedAtts = lists:member(att_encoding_info, Options),
             JsonBytes = ?JSON_ENCODE(couch_doc:to_json_obj(Doc, 
                     [attachments, follows|Options])),
             {ContentType, Len} = couch_doc:len_doc_to_multi_part_stream(
-                    Boundary,JsonBytes, Atts,false),
+                    Boundary,JsonBytes, Atts, CompressedAtts),
             CType = {<<"Content-Type">>, ContentType},
             {ok, Resp} = start_response_length(Req, 200, [CType|Headers], Len),
-            couch_doc:doc_to_multi_part_stream(Boundary,JsonBytes,Atts,
-                    fun(Data) -> couch_httpd:send(Resp, Data) end, false)
+            couch_doc:doc_to_multi_part_stream(
+                Boundary, JsonBytes, Atts,
+                fun(Data) -> couch_httpd:send(Resp, Data) end, CompressedAtts)
         end;
     false ->
         send_json(Req, 200, Headers, couch_doc:to_json_obj(Doc, Options))
@@ -750,6 +752,7 @@ send_doc_efficiently(#httpd{mochi_req = MochiReq} = Req,
 send_docs_multipart(Req, Results, Options) ->
     OuterBoundary = couch_uuids:random(),
     InnerBoundary = couch_uuids:random(),
+    CompressedAtts = lists:member(att_encoding_info, Options),
     CType = {"Content-Type", 
         "multipart/mixed; boundary=\"" ++ ?b2l(OuterBoundary) ++ "\""},
     {ok, Resp} = start_chunked_response(Req, 200, [CType]),
@@ -759,12 +762,12 @@ send_docs_multipart(Req, Results, Options) ->
             JsonBytes = ?JSON_ENCODE(couch_doc:to_json_obj(Doc, 
                     [attachments,follows|Options])),
             {ContentType, _Len} = couch_doc:len_doc_to_multi_part_stream(
-                    InnerBoundary, JsonBytes, Atts, false),
+                    InnerBoundary, JsonBytes, Atts, CompressedAtts),
             couch_httpd:send_chunk(Resp, <<"\r\nContent-Type: ",
                     ContentType/binary, "\r\n\r\n">>),
             couch_doc:doc_to_multi_part_stream(InnerBoundary, JsonBytes, Atts,
                     fun(Data) -> couch_httpd:send_chunk(Resp, Data)
-                    end, false),
+                    end, CompressedAtts),
              couch_httpd:send_chunk(Resp, <<"\r\n--", OuterBoundary/binary>>);
         ({{not_found, missing}, RevId}) ->
              RevStr = couch_doc:rev_to_str(RevId),
