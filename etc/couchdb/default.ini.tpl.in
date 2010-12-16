@@ -135,8 +135,10 @@ compressible_types = text/*, application/javascript, application/json,  applicat
 
 [replicator]
 worker_processes = 10
-; lower batch sizes are better for databases where most documents are very large
-; or where most documents have attachments larger than 64Kb
+; lower batch sizes are better for databases where:
+; 1) most documents are very large;
+; 2) most documents have attachments larger than 64Kb;
+; 3) most documents have many (8+) attachments
 worker_batch_size = 1000
 db = _replicator
 ; set to true to validate peer certificates
