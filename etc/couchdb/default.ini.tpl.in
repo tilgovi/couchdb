@@ -134,8 +134,8 @@ compression_level = 8 ; from 1 (lowest, fastest) to 9 (highest, slowest), 0 to d
 compressible_types = text/*, application/javascript, application/json,  application/xml
 
 [replicator]
-worker_processes = 8
-worker_batch_size = 1000
+worker_processes = 10
+worker_batch_size = 500
 db = _replicator
 ; set to true to validate peer certificates
 verify_ssl_certificates = false

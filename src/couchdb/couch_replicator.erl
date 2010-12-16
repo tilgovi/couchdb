@@ -192,7 +192,7 @@ do_init(#rep{options = Options} = Rep) ->
     } = State = init_state(Rep),
 
     {RevFindersCount, CopiersCount} = case list_to_integer(
-        couch_config:get("replicator", "worker_processes", "8")) of
+        couch_config:get("replicator", "worker_processes", "10")) of
     Small when Small < 2 ->
         ?LOG_ERROR("The number of worker processes for the replicator "
             "should be at least 2", []),
@@ -201,7 +201,7 @@ do_init(#rep{options = Options} = Rep) ->
         {N div 2, N div 2 + N rem 2}
     end,
     BatchSize = list_to_integer(
-        couch_config:get("replicator", "worker_batch_size", "1000")),
+        couch_config:get("replicator", "worker_batch_size", "500")),
     {ok, MissingRevsQueue} = couch_work_queue:new([
         {multi_workers, true},
         {max_items, trunc(BatchSize * CopiersCount * 1.10)}
