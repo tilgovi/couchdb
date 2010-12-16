@@ -31,7 +31,7 @@ parse_rep_doc({Props} = RepObj, UserCtx) ->
     ProxyParams = parse_proxy_params(get_value(<<"proxy">>, Props, <<>>)),
     Source = parse_rep_db(get_value(<<"source">>, Props), ProxyParams),
     Target = parse_rep_db(get_value(<<"target">>, Props), ProxyParams),
-    Options = convert_options(Props),
+    Options = make_options(Props),
     Rep = #rep{
         id = make_replication_id(Source, Target, UserCtx, Options),
         source = Source,
@@ -223,6 +223,16 @@ maybe_add_trailing_slash(Url) ->
     end.
 
 
+make_options(Props) ->
+    Options = lists:ukeysort(1, convert_options(Props)),
+    DefWorkers = couch_config:get("replicator", "worker_processes", "10"),
+    DefBatchSize = couch_config:get("replicator", "worker_batch_size", "1000"),
+    lists:ukeymerge(1, Options, [
+        {worker_batch_size, list_to_integer(DefBatchSize)},
+        {worker_processes, list_to_integer(DefWorkers)}
+    ]).
+
+
 convert_options([])->
     [];
 convert_options([{<<"cancel">>, V} | R]) ->
@@ -240,6 +250,10 @@ convert_options([{<<"doc_ids">>, V} | R]) ->
     % encoded doc IDs.
     DocIds = [?l2b(couch_httpd:unquote(Id)) || Id <- V],
     [{doc_ids, DocIds} | convert_options(R)];
+convert_options([{<<"worker_processes">>, V} | R]) ->
+    [{worker_processes, couch_util:to_integer(V)} | convert_options(R)];
+convert_options([{<<"worker_batch_size">>, V} | R]) ->
+    [{worker_batch_size, couch_util:to_integer(V)} | convert_options(R)];
 convert_options([_ | R]) -> % skip unknown option
     convert_options(R).
 
