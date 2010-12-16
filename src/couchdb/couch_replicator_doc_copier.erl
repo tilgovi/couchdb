@@ -10,11 +10,11 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(couch_replicator_doc_copiers).
+-module(couch_replicator_doc_copier).
 -behaviour(gen_server).
 
 % public API
--export([spawn_doc_copiers/5]).
+-export([start_link/4]).
 
 % gen_server callbacks
 -export([init/1, terminate/2, code_change/3]).
@@ -44,14 +44,6 @@
     stats = #rep_stats{}
 }).
 
-
-spawn_doc_copiers(Cp, Source, Target, MissingRevsQueue, CopiersCount) ->
-    lists:map(
-        fun(_) ->
-            {ok, Pid} = start_link(Cp, Source, Target, MissingRevsQueue),
-            Pid
-        end,
-        lists:seq(1, CopiersCount)).
 
 
 start_link(Cp, Source, Target, MissingRevsQueue) ->

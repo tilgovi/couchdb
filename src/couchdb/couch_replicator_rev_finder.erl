@@ -10,23 +10,20 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(couch_replicator_rev_finders).
+-module(couch_replicator_rev_finder).
 
--export([spawn_missing_rev_finders/5]).
+-export([start_link/4]).
 
 -include("couch_db.hrl").
 
 
 
-spawn_missing_rev_finders(Target, ChangesQueue, MissingRevsQueue,
-    RevFindersCount, BatchSize) ->
-    lists:map(
-        fun(_) ->
-            spawn_link(fun() ->
-                missing_revs_finder_loop(
-                    Target, ChangesQueue, MissingRevsQueue, BatchSize)
-            end)
-        end, lists:seq(1, RevFindersCount)).
+start_link(Target, ChangesQueue, MissingRevsQueue, BatchSize) ->
+    Pid = spawn_link(fun() ->
+        missing_revs_finder_loop(
+            Target, ChangesQueue, MissingRevsQueue, BatchSize)
+        end),
+    {ok, Pid}.
 
 
 missing_revs_finder_loop(Target, ChangesQueue, RevsQueue, BatchSize) ->

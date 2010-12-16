@@ -217,12 +217,22 @@ do_init(#rep{options = Options} = Rep) ->
     % This starts the missing rev finders. They check the target for changes
     % in the ChangesQueue to see if they exist on the target or not. If not,
     % adds them to MissingRevsQueue.
-    MissingRevFinders = couch_replicator_rev_finders:spawn_missing_rev_finders(
-        Target, ChangesQueue, MissingRevsQueue, RevFindersCount, BatchSize),
+    MissingRevFinders = lists:map(
+        fun(_) ->
+            {ok, Pid} = couch_replicator_rev_finder:start_link(
+                Target, ChangesQueue, MissingRevsQueue, BatchSize),
+            Pid
+        end,
+        lists:seq(1, RevFindersCount)),
     % This starts the doc copy processes. They fetch documents from the
     % MissingRevsQueue and copy them from the source to the target database.
-    Workers = couch_replicator_doc_copiers:spawn_doc_copiers(
-        self(), Source, Target, MissingRevsQueue, CopiersCount),
+    Workers = lists:map(
+        fun(_) ->
+            {ok, Pid} = couch_replicator_doc_copier:start_link(
+                self(), Source, Target, MissingRevsQueue),
+            Pid
+        end,
+        lists:seq(1, CopiersCount)),
 
     maybe_set_triggered(Rep),
 
