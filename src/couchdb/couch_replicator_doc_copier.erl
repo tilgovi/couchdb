@@ -256,14 +256,15 @@ spawn_writer(Target, DocList) ->
 
 after_full_flush(#state{cp = Cp, stats = Stats, flush_waiter = Waiter,
         highest_seq_seen = HighSeqDone} = State) ->
-    ok = gen_server:cast(Cp, {seq_done, HighSeqDone, Stats, self()}),
+    ok = gen_server:cast(Cp, {report_seq_done, HighSeqDone, Stats}),
     gen_server:reply(Waiter, ok),
     State#state{
         stats = #rep_stats{},
         flush_waiter = nil,
         writer = nil,
         docs = [],
-        size_docs = 0
+        size_docs = 0,
+        highest_seq_seen = ?LOWEST_SEQ
     }.
 
 

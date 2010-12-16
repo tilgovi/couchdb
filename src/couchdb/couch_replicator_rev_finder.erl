@@ -12,31 +12,33 @@
 
 -module(couch_replicator_rev_finder).
 
--export([start_link/4]).
+-export([start_link/5]).
 
 -include("couch_db.hrl").
 
 
 
-start_link(Target, ChangesQueue, MissingRevsQueue, BatchSize) ->
+start_link(Cp, Target, ChangesQueue, MissingRevsQueue, BatchSize) ->
     Pid = spawn_link(fun() ->
         missing_revs_finder_loop(
-            Target, ChangesQueue, MissingRevsQueue, BatchSize)
+            Cp, Target, ChangesQueue, MissingRevsQueue, BatchSize)
         end),
     {ok, Pid}.
 
 
-missing_revs_finder_loop(Target, ChangesQueue, RevsQueue, BatchSize) ->
+missing_revs_finder_loop(Cp, Target, ChangesQueue, RevsQueue, BatchSize) ->
     case couch_work_queue:dequeue(ChangesQueue, BatchSize) of
     closed ->
         ok;
     {ok, DocInfos} ->
+        #doc_info{high_seq = ReportSeq} = lists:last(DocInfos),
+        ok = gen_server:cast(Cp, {report_seq, ReportSeq}),
         IdRevs = [{Id, [Rev || #rev_info{rev = Rev} <- RevsInfo]} ||
                     #doc_info{id = Id, revs = RevsInfo} <- DocInfos],
         Target2 = reopen_db(Target),
         {ok, Missing} = couch_api_wrap:get_missing_revs(Target2, IdRevs),
         queue_missing_revs(Missing, DocInfos, RevsQueue),
-        missing_revs_finder_loop(Target2, ChangesQueue, RevsQueue, BatchSize)
+        missing_revs_finder_loop(Cp, Target2, ChangesQueue, RevsQueue, BatchSize)
     end.
 
 

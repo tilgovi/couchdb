@@ -47,7 +47,8 @@
     start_seq,
     committed_seq,
     current_through_seq,
-    done_seqs = dict:new(),
+    seqs_in_progress = [],
+    highest_seq_done = ?LOWEST_SEQ,
     source_log,
     target_log,
     rep_starttime,
@@ -59,7 +60,6 @@
     changes_reader,
     missing_rev_finders,
     workers,
-    worker_steps,
     stats = #rep_stats{},
     session_id,
     source_db_update_notifier = nil,
@@ -204,11 +204,11 @@ do_init(#rep{options = Options} = Rep) ->
         couch_config:get("replicator", "worker_batch_size", "500")),
     {ok, MissingRevsQueue} = couch_work_queue:new([
         {multi_workers, true},
-        {max_items, trunc(BatchSize * CopiersCount * 1.10)}
+        {max_items, trunc(CopiersCount * 1.50)}
     ]),
     {ok, ChangesQueue} = couch_work_queue:new([
         {multi_workers, true},
-        {max_items, trunc(BatchSize * RevFindersCount * 1.10)}
+        {max_items, trunc(BatchSize * RevFindersCount * 1.50)}
     ]),
     % This starts the _changes reader process. It adds the changes from
     % the source db to the ChangesQueue.
@@ -220,7 +220,7 @@ do_init(#rep{options = Options} = Rep) ->
     MissingRevFinders = lists:map(
         fun(_) ->
             {ok, Pid} = couch_replicator_rev_finder:start_link(
-                Target, ChangesQueue, MissingRevsQueue, BatchSize),
+                self(), Target, ChangesQueue, MissingRevsQueue, BatchSize),
             Pid
         end,
         lists:seq(1, RevFindersCount)),
@@ -241,8 +241,7 @@ do_init(#rep{options = Options} = Rep) ->
             changes_queue = ChangesQueue,
             changes_reader = ChangesReader,
             missing_rev_finders = MissingRevFinders,
-            workers = Workers,
-            worker_steps = dict:from_list([{Pid, 1} || Pid <- Workers])
+            workers = Workers
         }
     }.
 
@@ -343,23 +342,25 @@ handle_cast(checkpoint, State) ->
     State2 = do_checkpoint(State),
     {noreply, State2#rep_state{timer = start_timer(State)}};
 
-handle_cast({seq_done, Seq, StatsInc, Pid},
-    #rep_state{stats = Stats, done_seqs = DoneSeqs, worker_steps = Steps,
-        workers = Workers, current_through_seq = ThroughSeq} = State) ->
-    Step = dict:fetch(Pid, Steps),
-    DoneSeqs2 = case dict:find(Pid, DoneSeqs) of
-    error ->
-        dict:store(Pid, [{Step, Seq}], DoneSeqs);
-    {ok, WorkerSeqs} ->
-        dict:store(Pid, WorkerSeqs ++ [{Step, Seq}], DoneSeqs)
+handle_cast({report_seq, Seq},
+    #rep_state{seqs_in_progress = SeqsInProgress} = State) ->
+    NewSeqsInProgress = ordsets:add_element(Seq, SeqsInProgress),
+    {noreply, State#rep_state{seqs_in_progress = NewSeqsInProgress}};
+
+handle_cast({report_seq_done, Seq, StatsInc},
+    #rep_state{seqs_in_progress = SeqsInProgress, highest_seq_done = HighestDone,
+        current_through_seq = ThroughSeq, stats = Stats} = State) ->
+    {NewThroughSeq, NewSeqsInProgress} = case SeqsInProgress of
+    [Seq | Rest] ->
+        {Seq, Rest};
+    [_ | _] ->
+        {ThroughSeq, ordsets:del_element(Seq, SeqsInProgress)}
     end,
-    {NewThroughSeq, NewDoneSeqs} = next_checkpoint_seq(
-        ThroughSeq, DoneSeqs2, Workers),
     NewState = State#rep_state{
         stats = sum_stats([Stats, StatsInc]),
-        done_seqs = NewDoneSeqs,
         current_through_seq = NewThroughSeq,
-        worker_steps = dict:store(Pid, Step + 1, Steps)
+        seqs_in_progress = NewSeqsInProgress,
+        highest_seq_done = lists:max([HighestDone, Seq])
     },
     {noreply, NewState};
 
@@ -398,11 +399,12 @@ terminate_cleanup(State) ->
     couch_api_wrap:db_close(State#rep_state.target).
 
 
-do_last_checkpoint(#rep_state{done_seqs = DoneSeqs,
-        current_through_seq = ThroughSeq} = State) ->
-    State2 = do_checkpoint(State#rep_state{
-        current_through_seq = last_checkpoint_seq(DoneSeqs, ThroughSeq)}),
-    cancel_timer(State2).
+do_last_checkpoint(#rep_state{seqs_in_progress = [],
+    highest_seq_done = ?LOWEST_SEQ} = State) ->
+    cancel_timer(State);
+do_last_checkpoint(#rep_state{seqs_in_progress = [],
+    highest_seq_done = Seq} = State) ->
+    cancel_timer(do_checkpoint(State#rep_state{current_through_seq = Seq})).
 
 
 start_timer(State) ->
@@ -652,42 +654,6 @@ has_session_id(SessionId, [{Props} | Rest]) ->
     _Else ->
         has_session_id(SessionId, Rest)
     end.
-
-
-next_checkpoint_seq(LastCheckpointSeq, DoneSeqs, Workers) ->
-    {LowestSteps, Seqs} = dict:fold(
-        fun(_Pid, [], Acc) ->
-                Acc;
-            (_Pid, [{Step, Seq} | _], {StepAcc, SeqAcc}) ->
-                {[Step | StepAcc], [Seq | SeqAcc]}
-        end,
-        {[], []}, DoneSeqs),
-    case {length(LowestSteps) >= length(Workers), lists:usort(LowestSteps)} of
-    {true, [_]} ->
-        CheckpointSeq = lists:max([LastCheckpointSeq | Seqs]),
-        DoneSeqs2 = dict:map(
-            fun(_Pid, []) ->
-                    [];
-                (_Pid, [_ | Rest]) ->
-                    Rest
-            end,
-            DoneSeqs),
-        {CheckpointSeq, DoneSeqs2};
-    _ ->
-        {LastCheckpointSeq, DoneSeqs}
-    end.
-
-
-last_checkpoint_seq(DoneSeqs, DefaultSeq) ->
-    MaxSeqs = dict:fold(
-        fun(_Pid, [], Acc) ->
-                Acc;
-             (_Pid, SeqList, Acc) ->
-                {_, Seq} = lists:last(SeqList),
-                [Seq | Acc]
-        end,
-        [], DoneSeqs),
-    lists:max([DefaultSeq | MaxSeqs]).
 
 
 sum_stats([Stats1 | RestStats]) ->
