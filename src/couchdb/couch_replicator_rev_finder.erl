@@ -61,7 +61,7 @@ queue_missing_revs(Missing, DocInfos, Queue) ->
             end
         end,
         AllDict, non_missing(IdRevsSeqDict, Missing)),
-    ok = couch_work_queue:queue(Queue, lists:keysort(1, dict:to_list(AllDict2))).
+    ok = couch_work_queue:queue(Queue, dict:to_list(AllDict2)).
 
 
 non_missing(NonMissingDict, []) ->
