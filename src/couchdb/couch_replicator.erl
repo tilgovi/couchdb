@@ -182,7 +182,7 @@ init(InitArgs) ->
         {stop, Error}
     end.
 
-do_init(#rep{options = Options} = Rep) ->
+do_init(#rep{options = Options, id = {BaseId, Ext}} = Rep) ->
     process_flag(trap_exit, true),
 
     #rep_state{
@@ -225,15 +225,34 @@ do_init(#rep{options = Options} = Rep) ->
         lists:seq(1, RevFindersCount)),
     % This starts the doc copy processes. They fetch documents from the
     % MissingRevsQueue and copy them from the source to the target database.
+    MaxParallelConns = get_value(worker_max_connections, Options),
     Workers = lists:map(
         fun(_) ->
             {ok, Pid} = couch_replicator_doc_copier:start_link(
-                self(), Source, Target, MissingRevsQueue),
+                self(), Source, Target, MissingRevsQueue, MaxParallelConns),
             Pid
         end,
         lists:seq(1, CopiersCount)),
 
     maybe_set_triggered(Rep),
+
+    % Restarting a supervised child implies that the original arguments
+    % (#rep{} record) specified in the MFA component of the supervisor
+    % child spec will always be used whenever the child is restarted.
+    % This implies the same replication performance tunning parameters will
+    % always be used. See the following thread for details:
+    %
+    % http://www.erlang.org/cgi-bin/ezmlm-cgi?3:sss:1772:201012:kihiniifeclgnpodlipd#b
+    %
+    % The current solution is to delete the child spec (see end_replication/1)
+    % and then start the replication again.
+
+    ?LOG_INFO("Replication `~p` is using:~n"
+        "~c~p worker processes~n"
+        "~ca worker batch size of ~p~n"
+        "~ca maximum of ~p HTTP connections per worker",
+        [BaseId ++ Ext, $\t, RevFindersCount + CopiersCount, $\t,
+            BatchSize, $\t, MaxParallelConns]),
 
     {ok, State#rep_state{
             missing_revs_queue = MissingRevsQueue,

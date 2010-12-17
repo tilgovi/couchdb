@@ -227,8 +227,10 @@ make_options(Props) ->
     Options = lists:ukeysort(1, convert_options(Props)),
     DefWorkers = couch_config:get("replicator", "worker_processes", "10"),
     DefBatchSize = couch_config:get("replicator", "worker_batch_size", "1000"),
+    DefConns = couch_config:get("replicator", "worker_max_connections", "25"),
     lists:ukeymerge(1, Options, [
         {worker_batch_size, list_to_integer(DefBatchSize)},
+        {worker_max_connections, list_to_integer(DefConns)},
         {worker_processes, list_to_integer(DefWorkers)}
     ]).
 
@@ -254,6 +256,8 @@ convert_options([{<<"worker_processes">>, V} | R]) ->
     [{worker_processes, couch_util:to_integer(V)} | convert_options(R)];
 convert_options([{<<"worker_batch_size">>, V} | R]) ->
     [{worker_batch_size, couch_util:to_integer(V)} | convert_options(R)];
+convert_options([{<<"worker_max_connections">>, V} | R]) ->
+    [{worker_max_connections, couch_util:to_integer(V)} | convert_options(R)];
 convert_options([_ | R]) -> % skip unknown option
     convert_options(R).
 

@@ -14,7 +14,7 @@
 -behaviour(gen_server).
 
 % public API
--export([start_link/4]).
+-export([start_link/5]).
 
 % gen_server callbacks
 -export([init/1, terminate/2, code_change/3]).
@@ -23,7 +23,6 @@
 -include("couch_db.hrl").
 -include("couch_api_wrap.hrl").
 
--define(MAX_PARALLEL_FETCHS, 10).
 -define(DOC_BUFFER_BYTE_SIZE, 1024 * 1024). % for remote targets
 -define(DOC_BUFFER_LEN, 100).               % for local targets, # of documents
 -define(MAX_BULK_ATT_SIZE, 64 * 1024).
@@ -32,6 +31,7 @@
 -record(state, {
     loop,
     cp,
+    max_parallel_conns,
     source,
     target,
     docs = [],
@@ -46,11 +46,12 @@
 
 
 
-start_link(Cp, Source, Target, MissingRevsQueue) ->
-    gen_server:start_link(?MODULE, {Cp, Source, Target, MissingRevsQueue}, []).
+start_link(Cp, Source, Target, MissingRevsQueue, MaxConns) ->
+    gen_server:start_link(
+        ?MODULE, {Cp, Source, Target, MissingRevsQueue, MaxConns}, []).
 
 
-init({Cp, Source, Target, MissingRevsQueue}) ->
+init({Cp, Source, Target, MissingRevsQueue, MaxConns}) ->
     process_flag(trap_exit, true),
     Parent = self(),
     LoopPid = spawn_link(
@@ -58,6 +59,7 @@ init({Cp, Source, Target, MissingRevsQueue}) ->
     ),
     State = #state{
         cp = Cp,
+        max_parallel_conns = MaxConns,
         loop = LoopPid,
         source = Source,
         target = Target
@@ -77,13 +79,14 @@ handle_call({seq_done, Seq, RevCount}, {Pid, _},
 
 handle_call({fetch_doc, {_Id, Revs, _PAs, Seq} = Params}, {Pid, _} = From,
     #state{loop = Pid, readers = Readers, pending_fetch = nil,
-        highest_seq_seen = HighSeq, stats = Stats} = State) ->
+        highest_seq_seen = HighSeq, stats = Stats,
+        max_parallel_conns = MaxConns} = State) ->
     Stats2 = Stats#rep_stats{
         missing_checked = Stats#rep_stats.missing_checked + length(Revs),
         missing_found = Stats#rep_stats.missing_found + length(Revs)
     },
     case length(Readers) of
-    Size when Size < ?MAX_PARALLEL_FETCHS ->
+    Size when Size < MaxConns ->
         {Fetcher, Source2} = spawn_doc_reader(State#state.source, Params),
         NewState = State#state{
             highest_seq_seen = lists:max([Seq, HighSeq]),
