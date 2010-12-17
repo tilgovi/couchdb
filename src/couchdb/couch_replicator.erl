@@ -191,15 +191,8 @@ do_init(#rep{options = Options, id = {BaseId, Ext}} = Rep) ->
         start_seq = StartSeq
     } = State = init_state(Rep),
 
-    {RevFindersCount, CopiersCount} =
-    case get_value(worker_processes, Options) of
-    N when N < 2 ->
-        ?LOG_ERROR("The number of worker processes for a replication"
-            " should be at least 2. Using minimum value 2.", []),
-        {1, 1};
-    N ->
-        {N div 2, N div 2 + N rem 2}
-    end,
+    CopiersCount = get_value(worker_processes, Options),
+    RevFindersCount = CopiersCount,
     BatchSize = get_value(worker_batch_size, Options),
     {ok, MissingRevsQueue} = couch_work_queue:new([
         {multi_workers, true},
@@ -251,8 +244,7 @@ do_init(#rep{options = Options, id = {BaseId, Ext}} = Rep) ->
         "~c~p worker processes~n"
         "~ca worker batch size of ~p~n"
         "~ca maximum of ~p HTTP connections per worker",
-        [BaseId ++ Ext, $\t, RevFindersCount + CopiersCount, $\t,
-            BatchSize, $\t, MaxParallelConns]),
+        [BaseId ++ Ext, $\t, CopiersCount, $\t, BatchSize, $\t, MaxParallelConns]),
 
     {ok, State#rep_state{
             missing_revs_queue = MissingRevsQueue,
