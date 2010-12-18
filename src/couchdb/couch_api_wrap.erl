@@ -63,7 +63,7 @@ db_uri(DbName) ->
 db_open(Db, Options) ->
     db_open(Db, Options, false).
 
-db_open(#httpdb{} = Db1, Options, Create) ->
+db_open(#httpdb{} = Db1, _Options, Create) ->
     {ok, Db} = couch_api_wrap_httpc:setup(Db1),
     case Create of
     false ->
