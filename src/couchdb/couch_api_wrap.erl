@@ -23,6 +23,7 @@
 
 -export([
     db_open/2,
+    db_open/3,
     db_close/1,
     get_db_info/1,
     update_doc/3,
@@ -59,9 +60,12 @@ db_uri(DbName) ->
     ?b2l(DbName).
 
 
-db_open(#httpdb{} = Db1, Options) ->
+db_open(Db, Options) ->
+    db_open(Db, Options, false).
+
+db_open(#httpdb{} = Db1, Options, Create) ->
     {ok, Db} = couch_api_wrap_httpc:setup(Db1),
-    case get_value(create_target, Options, false) of
+    case Create of
     false ->
         ok;
     true ->
@@ -75,9 +79,9 @@ db_open(#httpdb{} = Db1, Options) ->
         (_, _, _) ->
             throw({db_not_found, ?l2b(db_uri(Db))})
         end);
-db_open(DbName, Options) ->
+db_open(DbName, Options, Create) ->
     try
-        case get_value(create_target, Options, false) of
+        case Create of
         false ->
             ok;
         true ->

@@ -443,9 +443,9 @@ init_state(Rep) ->
         source = Src, target = Tgt,
         options = Options, user_ctx = UserCtx
     } = Rep,
-
-    {ok, Source} = couch_api_wrap:db_open(Src, [{user_ctx, UserCtx} | Options]),
-    {ok, Target} = couch_api_wrap:db_open(Tgt, [{user_ctx, UserCtx} | Options]),
+    {ok, Source} = couch_api_wrap:db_open(Src, [{user_ctx, UserCtx}]),
+    {ok, Target} = couch_api_wrap:db_open(Tgt, [{user_ctx, UserCtx}],
+        get_value(create_target, Options, false)),
 
     {ok, SourceInfo} = couch_api_wrap:get_db_info(Source),
     {ok, TargetInfo} = couch_api_wrap:get_db_info(Target),
