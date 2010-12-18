@@ -29,9 +29,9 @@
 
 parse_rep_doc({Props} = RepObj, UserCtx) ->
     ProxyParams = parse_proxy_params(get_value(<<"proxy">>, Props, <<>>)),
-    Source = parse_rep_db(get_value(<<"source">>, Props), ProxyParams),
-    Target = parse_rep_db(get_value(<<"target">>, Props), ProxyParams),
     Options = make_options(Props),
+    Source = parse_rep_db(get_value(<<"source">>, Props), ProxyParams, Options),
+    Target = parse_rep_db(get_value(<<"target">>, Props), ProxyParams, Options),
     Rep = #rep{
         id = make_replication_id(Source, Target, UserCtx, Options),
         source = Source,
@@ -173,7 +173,7 @@ get_rep_endpoint(UserCtx, <<DbName/binary>>) ->
     {local, DbName, UserCtx}.
 
 
-parse_rep_db({Props}, ProxyParams) ->
+parse_rep_db({Props}, ProxyParams, Options) ->
     Url = maybe_add_trailing_slash(get_value(<<"url">>, Props)),
     {AuthProps} = get_value(<<"auth">>, Props, {[]}),
     {BinHeaders} = get_value(<<"headers">>, Props, {[]}),
@@ -202,13 +202,14 @@ parse_rep_db({Props}, ProxyParams) ->
         oauth = OAuth,
         headers = lists:ukeymerge(1, Headers, DefaultHeaders),
         proxy_options = ProxyParams,
-        ssl_options = ssl_params(Url)
+        ssl_options = ssl_params(Url),
+        timeout = get_value(connection_timeout, Options)
     };
-parse_rep_db(<<"http://", _/binary>> = Url, ProxyParams) ->
-    parse_rep_db({[{<<"url">>, Url}]}, ProxyParams);
-parse_rep_db(<<"https://", _/binary>> = Url, ProxyParams) ->
-    parse_rep_db({[{<<"url">>, Url}]}, ProxyParams);
-parse_rep_db(<<DbName/binary>>, _ProxyParams) ->
+parse_rep_db(<<"http://", _/binary>> = Url, ProxyParams, Options) ->
+    parse_rep_db({[{<<"url">>, Url}]}, ProxyParams, Options);
+parse_rep_db(<<"https://", _/binary>> = Url, ProxyParams, Options) ->
+    parse_rep_db({[{<<"url">>, Url}]}, ProxyParams, Options);
+parse_rep_db(<<DbName/binary>>, _ProxyParams, _Options) ->
     DbName.
 
 
@@ -228,7 +229,9 @@ make_options(Props) ->
     DefWorkers = couch_config:get("replicator", "worker_processes", "5"),
     DefBatchSize = couch_config:get("replicator", "worker_batch_size", "1000"),
     DefConns = couch_config:get("replicator", "worker_max_connections", "25"),
+    DefTimeout = couch_config:get("replicator", "connection_timeout", "30000"),
     lists:ukeymerge(1, Options, [
+        {connection_timeout, list_to_integer(DefTimeout)},
         {worker_batch_size, list_to_integer(DefBatchSize)},
         {worker_max_connections, list_to_integer(DefConns)},
         {worker_processes, list_to_integer(DefWorkers)}
@@ -258,6 +261,8 @@ convert_options([{<<"worker_batch_size">>, V} | R]) ->
     [{worker_batch_size, couch_util:to_integer(V)} | convert_options(R)];
 convert_options([{<<"worker_max_connections">>, V} | R]) ->
     [{worker_max_connections, couch_util:to_integer(V)} | convert_options(R)];
+convert_options([{<<"connection_timeout">>, V} | R]) ->
+    [{connection_timeout, couch_util:to_integer(V)} | convert_options(R)];
 convert_options([_ | R]) -> % skip unknown option
     convert_options(R).
 

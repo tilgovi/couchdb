@@ -19,7 +19,7 @@
         {"Accept", "application/json"},
         {"User-Agent", "CouchDB/" ++ couch_server:get_version()}
     ],
-    timeout = 30000,    % milliseconds
+    timeout,            % milliseconds
     proxy_options = [],
     ssl_options = [],
     retries = 10,

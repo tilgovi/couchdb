@@ -243,8 +243,10 @@ do_init(#rep{options = Options, id = {BaseId, Ext}} = Rep) ->
     ?LOG_INFO("Replication `~p` is using:~n"
         "~c~p worker processes~n"
         "~ca worker batch size of ~p~n"
-        "~ca maximum of ~p HTTP connections per worker",
-        [BaseId ++ Ext, $\t, CopiersCount, $\t, BatchSize, $\t, MaxParallelConns]),
+        "~ca maximum of ~p HTTP connections per worker~n"
+        "~ca connection timeout of ~p milliseconds",
+        [BaseId ++ Ext, $\t, CopiersCount, $\t, BatchSize, $\t,
+            MaxParallelConns, $\t, get_value(connection_timeout, Options)]),
 
     {ok, State#rep_state{
             missing_revs_queue = MissingRevsQueue,
@@ -441,9 +443,9 @@ init_state(Rep) ->
         source = Src, target = Tgt,
         options = Options, user_ctx = UserCtx
     } = Rep,
-    {ok, Source} = couch_api_wrap:db_open(Src, [{user_ctx, UserCtx}]),
-    {ok, Target} = couch_api_wrap:db_open(Tgt, [{user_ctx, UserCtx}],
-        get_value(create_target, Options, false)),
+
+    {ok, Source} = couch_api_wrap:db_open(Src, [{user_ctx, UserCtx} | Options]),
+    {ok, Target} = couch_api_wrap:db_open(Tgt, [{user_ctx, UserCtx} | Options]),
 
     {ok, SourceInfo} = couch_api_wrap:get_db_info(Source),
     {ok, TargetInfo} = couch_api_wrap:get_db_info(Target),
