@@ -142,13 +142,14 @@ worker_processes = 4
 ; 3) most documents have many (8+) attachments
 worker_batch_size = 1000
 ; The maximum number of HTTP connections each replication worker uses in parallel.
-; This option only has impact on pull replications (remote source).
+; This option has mostly impact on pull replications (remote source).
 worker_max_connections = 25
 connection_timeout = 30000
 ; Some socket options that might boost performance in some scenarios:
 ;   {nodelay, boolean()}
 ;   {sndbuf, integer()}
 ;   {recbuf, integer()}
+;   {priority, integer()}
 ;
 ; See the `inet` Erlang module's man page for the full list of options
 socket_options = [{reuseaddr, true}, {keepalive, true}]
