@@ -489,6 +489,21 @@ couchTests.replication = function(debug) {
   }
 
 
+  // test error when source database does not exist
+  try {
+    CouchDB.replicate("foobar", "test_suite_db");
+    T(false, "should have failed with db_not_found error");
+  } catch (x) {
+    TEquals("db_not_found", x.error);
+  }
+  try {
+    CouchDB.replicate(CouchDB.protocol + host + "/foobar", "test_suite_db");
+    T(false, "should have failed with db_not_found error");
+  } catch (x) {
+    TEquals("db_not_found", x.error);
+  }
+
+
   // test create_target option
   for (i = 0; i < dbPairs.length; i++) {
     populateDb(sourceDb, docs);
@@ -1382,6 +1397,7 @@ couchTests.replication = function(debug) {
         CouchDB.replicate(dbPairs[i].source, dbPairs[i].target);
         T(false, "should have raised an exception");
       } catch (x) {
+        TEquals("unauthorized", x.error);
       }
 
       TEquals(true, CouchDB.logout().ok);
