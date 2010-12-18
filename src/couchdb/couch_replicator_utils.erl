@@ -197,12 +197,15 @@ parse_rep_db({Props}, ProxyParams, Options) ->
                 end
         }
     end,
+    {ok, SocketOptions} = couch_util:parse_term(
+        couch_config:get("replicator", "socket_options",
+            "[{reuseaddr, true}, {keepalive, true}]")),
     #httpdb{
         url = Url,
         oauth = OAuth,
         headers = lists:ukeymerge(1, Headers, DefaultHeaders),
-        proxy_options = ProxyParams,
-        ssl_options = ssl_params(Url),
+        ibrowse_options =
+            [{socket_options, SocketOptions} | ProxyParams ++ ssl_params(Url)],
         timeout = get_value(connection_timeout, Options)
     };
 parse_rep_db(<<"http://", _/binary>> = Url, ProxyParams, Options) ->

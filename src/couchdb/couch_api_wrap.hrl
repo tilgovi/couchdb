@@ -20,8 +20,7 @@
         {"User-Agent", "CouchDB/" ++ couch_server:get_version()}
     ],
     timeout,            % milliseconds
-    proxy_options = [],
-    ssl_options = [],
+    ibrowse_options = [],
     retries = 10,
     wait = 250,         % milliseconds
     httpc_pool = nil

@@ -134,6 +134,7 @@ compression_level = 8 ; from 1 (lowest, fastest) to 9 (highest, slowest), 0 to d
 compressible_types = text/*, application/javascript, application/json,  application/xml
 
 [replicator]
+db = _replicator
 worker_processes = 4
 ; Lower batch sizes are better for databases where:
 ; 1) most documents are very large;
@@ -144,7 +145,13 @@ worker_batch_size = 1000
 ; This option only has impact on pull replications (remote source).
 worker_max_connections = 25
 connection_timeout = 30000
-db = _replicator
+; Some socket options that might boost performance in some scenarios:
+;   {nodelay, boolean()}
+;   {sndbuf, integer()}
+;   {recbuf, integer()}
+;
+; See the `inet` Erlang module's man page for the full list of options
+socket_options = [{reuseaddr, true}, {keepalive, true}]
 ; set to true to validate peer certificates
 verify_ssl_certificates = false
 ; file containing a list of peer trusted certificates (PEM format)

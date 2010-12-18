@@ -44,10 +44,8 @@ send_req(#httpdb{headers = BaseHeaders, httpc_pool = Pool} = HttpDb,
     Headers1 = lists:ukeymerge(1, UserHeaders, BaseHeaders),
     Body = get_value(body, Params, []),
     IbrowseOptions = [
-        {response_format, binary}, {inactivity_timeout, HttpDb#httpdb.timeout},
-        {socket_options, [{reuseaddr, true}, {keepalive, true}]}
-        | HttpDb#httpdb.proxy_options ++ HttpDb#httpdb.ssl_options ++
-            get_value(ibrowse_options, Params, [])
+        {response_format, binary}, {inactivity_timeout, HttpDb#httpdb.timeout} |
+        HttpDb#httpdb.ibrowse_options ++ get_value(ibrowse_options, Params, [])
     ],
     Headers2 = oauth_header(HttpDb, Params) ++ Headers1,
     Url = full_url(HttpDb, Params),
