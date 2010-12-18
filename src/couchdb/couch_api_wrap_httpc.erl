@@ -41,15 +41,8 @@ send_req(#httpdb{headers = BaseHeaders, httpc_pool = Pool} = HttpDb,
         [{K, ?b2l(iolist_to_binary(V))} || {K, V} <- get_value(qs, Params1, [])]),
     Method = get_value(method, Params, get),
     UserHeaders = lists:keysort(1, get_value(headers, Params, [])),
-    Headers = lists:ukeymerge(1, UserHeaders, BaseHeaders),
+    Headers1 = lists:ukeymerge(1, UserHeaders, BaseHeaders),
     Body = get_value(body, Params, []),
-    Headers1 = case (Body =:= [] orelse Body =:= <<>>) andalso
-        (Method =:= put orelse Method =:= post) of
-    true ->
-        ?replace(Headers, "Content-Length", 0);
-    false ->
-        Headers
-    end,
     IbrowseOptions = [
         {response_format, binary}, {inactivity_timeout, HttpDb#httpdb.timeout},
         {socket_options, [{reuseaddr, true}, {keepalive, true}]}
