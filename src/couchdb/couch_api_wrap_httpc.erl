@@ -37,15 +37,18 @@ setup(#httpdb{url = Url, httpc_pool = nil} = Db) ->
 
 send_req(#httpdb{headers = BaseHeaders, httpc_pool = Pool} = HttpDb,
          Params1, Callback) ->
-    Params = ?replace(Params1, qs,
+    Params2 = ?replace(Params1, qs,
         [{K, ?b2l(iolist_to_binary(V))} || {K, V} <- get_value(qs, Params1, [])]),
+    Params = ?replace(Params2, ibrowse_options,
+        lists:keysort(1, get_value(ibrowse_options, Params2, []))),
     Method = get_value(method, Params, get),
     UserHeaders = lists:keysort(1, get_value(headers, Params, [])),
     Headers1 = lists:ukeymerge(1, UserHeaders, BaseHeaders),
     Body = get_value(body, Params, []),
     IbrowseOptions = [
         {response_format, binary}, {inactivity_timeout, HttpDb#httpdb.timeout} |
-        HttpDb#httpdb.ibrowse_options ++ get_value(ibrowse_options, Params, [])
+        lists:ukeymerge(1, get_value(ibrowse_options, Params, []),
+            HttpDb#httpdb.ibrowse_options)
     ],
     Headers2 = oauth_header(HttpDb, Params) ++ Headers1,
     Url = full_url(HttpDb, Params),

@@ -204,8 +204,8 @@ parse_rep_db({Props}, ProxyParams, Options) ->
         url = Url,
         oauth = OAuth,
         headers = lists:ukeymerge(1, Headers, DefaultHeaders),
-        ibrowse_options =
-            [{socket_options, SocketOptions} | ProxyParams ++ ssl_params(Url)],
+        ibrowse_options = lists:keysort(1,
+            [{socket_options, SocketOptions} | ProxyParams ++ ssl_params(Url)]),
         timeout = get_value(connection_timeout, Options)
     };
 parse_rep_db(<<"http://", _/binary>> = Url, ProxyParams, Options) ->
