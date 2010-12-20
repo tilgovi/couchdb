@@ -25,7 +25,7 @@
     get_value/3
 ]).
 
--define(RETRY_LATER_WAIT, 100).
+-define(RETRY_LATER_WAIT, 50).
 -define(replace(L, K, V), lists:keystore(K, 1, L, {K, V})).
 
 
