@@ -148,6 +148,8 @@ worker_batch_size = 1000
 http_connections = 20
 http_pipeline_size = 5
 ; HTTP connection timeout per replication.
+; Even for very fast/reliable networks it might need to be increased if a remote
+; database is too busy.
 connection_timeout = 30000
 ; Some socket options that might boost performance in some scenarios:
 ;       {nodelay, boolean()}
