@@ -246,9 +246,11 @@ do_init(#rep{options = Options, id = {BaseId, Ext}} = Rep) ->
         "~c~p worker processes~n"
         "~ca worker batch size of ~p~n"
         "~c~p HTTP connections, each with a pipeline size of ~p~n"
-        "~ca connection timeout of ~p milliseconds",
+        "~ca connection timeout of ~p milliseconds~n"
+        "~csocket options are: ~s",
         [BaseId ++ Ext, $\t, CopiersCount, $\t, BatchSize, $\t, MaxHttpConns,
-            HttpPipeSize, $\t, get_value(connection_timeout, Options)]),
+            HttpPipeSize, $\t, get_value(connection_timeout, Options),
+            $\t, io_lib:format("~p", [get_value(socket_options, Options)])]),
 
     {ok, State#rep_state{
             missing_revs_queue = MissingRevsQueue,

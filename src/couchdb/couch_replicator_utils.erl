@@ -197,15 +197,13 @@ parse_rep_db({Props}, ProxyParams, Options) ->
                 end
         }
     end,
-    {ok, SocketOptions} = couch_util:parse_term(
-        couch_config:get("replicator", "socket_options",
-            "[{reuseaddr, true}, {keepalive, true}]")),
     #httpdb{
         url = Url,
         oauth = OAuth,
         headers = lists:ukeymerge(1, Headers, DefaultHeaders),
         ibrowse_options = lists:keysort(1,
-            [{socket_options, SocketOptions} | ProxyParams ++ ssl_params(Url)]),
+            [{socket_options, get_value(socket_options, Options)} |
+                ProxyParams ++ ssl_params(Url)]),
         timeout = get_value(connection_timeout, Options),
         http_connections = get_value(http_connections, Options),
         http_pipeline_size = get_value(http_pipeline_size, Options)
@@ -236,10 +234,14 @@ make_options(Props) ->
     DefConns = couch_config:get("replicator", "http_connections", "20"),
     DefPipeSize = couch_config:get("replicator", "http_pipeline_size", "5"),
     DefTimeout = couch_config:get("replicator", "connection_timeout", "30000"),
+    {ok, DefSocketOptions} = couch_util:parse_term(
+        couch_config:get("replicator", "socket_options",
+            "[{reuseaddr, true}, {keepalive, true}]")),
     lists:ukeymerge(1, Options, [
         {connection_timeout, list_to_integer(DefTimeout)},
         {http_connections, list_to_integer(DefConns)},
         {http_pipeline_size, list_to_integer(DefPipeSize)},
+        {socket_options, DefSocketOptions},
         {worker_batch_size, list_to_integer(DefBatchSize)},
         {worker_processes, list_to_integer(DefWorkers)}
     ]).
@@ -272,6 +274,9 @@ convert_options([{<<"http_pipeline_size">>, V} | R]) ->
     [{http_pipeline_size, couch_util:to_integer(V)} | convert_options(R)];
 convert_options([{<<"connection_timeout">>, V} | R]) ->
     [{connection_timeout, couch_util:to_integer(V)} | convert_options(R)];
+convert_options([{<<"socket_options">>, V} | R]) ->
+    {ok, SocketOptions} = couch_util:parse_term(V),
+    [{socket_options, SocketOptions} | convert_options(R)];
 convert_options([_ | R]) -> % skip unknown option
     convert_options(R).
 
