@@ -218,7 +218,9 @@ do_init(#rep{options = Options, id = {BaseId, Ext}} = Rep) ->
         lists:seq(1, RevFindersCount)),
     % This starts the doc copy processes. They fetch documents from the
     % MissingRevsQueue and copy them from the source to the target database.
-    MaxParallelConns = get_value(worker_max_connections, Options),
+    MaxHttpConns = get_value(http_connections, Options),
+    HttpPipeSize = get_value(http_pipeline_size, Options),
+    MaxParallelConns = (MaxHttpConns * HttpPipeSize) div CopiersCount,
     Workers = lists:map(
         fun(_) ->
             {ok, Pid} = couch_replicator_doc_copier:start_link(
@@ -243,10 +245,10 @@ do_init(#rep{options = Options, id = {BaseId, Ext}} = Rep) ->
     ?LOG_INFO("Replication `~p` is using:~n"
         "~c~p worker processes~n"
         "~ca worker batch size of ~p~n"
-        "~ca maximum of ~p HTTP connections per worker~n"
+        "~c~p HTTP connections, each with a pipeline size of ~p~n"
         "~ca connection timeout of ~p milliseconds",
-        [BaseId ++ Ext, $\t, CopiersCount, $\t, BatchSize, $\t,
-            MaxParallelConns, $\t, get_value(connection_timeout, Options)]),
+        [BaseId ++ Ext, $\t, CopiersCount, $\t, BatchSize, $\t, MaxHttpConns,
+            HttpPipeSize, $\t, get_value(connection_timeout, Options)]),
 
     {ok, State#rep_state{
             missing_revs_queue = MissingRevsQueue,

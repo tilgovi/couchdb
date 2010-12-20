@@ -29,14 +29,15 @@
 -define(replace(L, K, V), lists:keystore(K, 1, L, {K, V})).
 
 
-setup(#httpdb{url = Url, httpc_pool = nil} = Db) ->
-    #url{host = Host, port = Port} = ibrowse_lib:parse_url(Url),
-    {ok, Pid} = couch_httpc_pool:start_link(Host, Port),
+setup(#httpdb{httpc_pool = nil, url = Url, ibrowse_options = IbrowseOptions,
+    http_connections = MaxConns, http_pipeline_size = PipeSize} = Db) ->
+    {ok, Pid} = couch_httpc_pool:start_link(
+        ibrowse_lib:parse_url(Url), get_value(ssl_options, IbrowseOptions, []),
+        MaxConns, PipeSize),
     {ok, Db#httpdb{httpc_pool = Pid}}.
 
 
-send_req(#httpdb{headers = BaseHeaders, httpc_pool = Pool} = HttpDb,
-         Params1, Callback) ->
+send_req(#httpdb{headers = BaseHeaders} = HttpDb, Params1, Callback) ->
     Params2 = ?replace(Params1, qs,
         [{K, ?b2l(iolist_to_binary(V))} || {K, V} <- get_value(qs, Params1, [])]),
     Params = ?replace(Params2, ibrowse_options,
@@ -59,11 +60,21 @@ send_req(#httpdb{headers = BaseHeaders, httpc_pool = Pool} = HttpDb,
         Response = ibrowse:send_req_direct(
             Pid, Url, Headers2, Method, Body, IbrowseOptions, infinity);
     false ->
-        {ok, Worker} = couch_httpc_pool:get_worker(Pool),
+        Worker = get_pool_worker(HttpDb),
         Response = ibrowse:send_req_direct(
             Worker, Url, Headers2, Method, Body, IbrowseOptions, infinity)
     end,
     process_response(Response, Worker, HttpDb, Params, Callback).
+
+
+get_pool_worker(#httpdb{httpc_pool = Pool} = HttpDb) ->
+    case couch_httpc_pool:get_worker(Pool) of
+    {ok, Worker} ->
+        Worker;
+    retry_later ->
+        ok = timer:sleep(?RETRY_LATER_WAIT),
+        get_pool_worker(HttpDb)
+    end.
 
 
 process_response({error, sel_conn_closed}, _Worker, HttpDb, Params, Callback) ->
@@ -124,8 +135,8 @@ stop_worker({direct, Worker}, _HttpDb) ->
     unlink(Worker),
     receive {'EXIT', Worker, _} -> ok after 0 -> ok end,
     catch ibrowse:stop_worker_process(Worker);
-stop_worker(Worker, #httpdb{httpc_pool = Pool}) ->
-    ok = couch_httpc_pool:release_worker(Pool, Worker).
+stop_worker(_Worker, _HttpDb) ->
+    ok.
 
 
 maybe_retry(Error, Worker, #httpdb{retries = 0} = HttpDb, Params, _Cb) ->
