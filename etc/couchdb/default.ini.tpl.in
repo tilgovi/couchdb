@@ -143,10 +143,16 @@ worker_processes = 4
 ; 1) most documents are very large;
 ; 2) most documents have many and/or large attachments
 worker_batch_size = 1000
-; Number of HTTP connections and pipeline size per replication.
+; Number of HTTP connections and HTTP pipeline size per replication.
 ; These two settings have more impact on pull replications.
-http_connections = 20
-http_pipeline_size = 5
+; HTTP pipelining (pipeline size > 1) reduces the total number of connections
+; (file descriptors) necessary to do a replication and might offer an almost
+; insignificant performance gain. If one request in the pipeline fails (due to
+; a timeout for e.g.) all the other requests that follow it in the pipeline have
+; to be retried, which slows down the whole replication process.
+; Lower pipeline sizes are usually better.
+http_connections = 50
+http_pipeline_size = 2
 ; HTTP connection timeout per replication.
 ; Even for very fast/reliable networks it might need to be increased if a remote
 ; database is too busy.
