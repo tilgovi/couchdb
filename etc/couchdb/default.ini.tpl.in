@@ -151,8 +151,8 @@ worker_batch_size = 1000
 ; a timeout for e.g.) all the other requests that follow it in the pipeline have
 ; to be retried, which slows down the whole replication process.
 ; Lower pipeline sizes are usually better.
-http_connections = 50
-http_pipeline_size = 2
+http_connections = 25
+http_pipeline_size = 4
 ; HTTP connection timeout per replication.
 ; Even for very fast/reliable networks it might need to be increased if a remote
 ; database is too busy.
