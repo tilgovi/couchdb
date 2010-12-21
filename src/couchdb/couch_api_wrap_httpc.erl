@@ -148,16 +148,10 @@ maybe_retry(Error, Worker, #httpdb{retries = Retries, wait = Wait} = HttpDb,
     Method = string:to_upper(atom_to_list(get_value(method, Params, get))),
     Url = couch_util:url_strip_password(full_url(HttpDb, Params)),
     ?LOG_INFO("Retrying ~s request to ~s in ~p seconds due to error ~p",
-        [Method, Url, Wait / 1000, Error]),
+        [Method, Url, Wait / 1000, error_cause(Error)]),
     ok = timer:sleep(Wait),
     send_req(HttpDb#httpdb{retries = Retries - 1, wait = Wait * 2}, Params, Cb).
 
-
-report_error(Worker, #httpdb{timeout = Timeout} = HttpDb, Params, timeout) ->
-    report_error(Worker, HttpDb, Params, {timeout, Timeout});
-
-report_error(Worker, #httpdb{timeout = T} = Db, Params, {error, req_timedout}) ->
-    report_error(Worker, Db, Params, {timeout, T});
 
 report_error(Worker, HttpDb, Params, Error) ->
     Method = string:to_upper(atom_to_list(get_value(method, Params, get))),
@@ -167,17 +161,19 @@ report_error(Worker, HttpDb, Params, Error) ->
     exit({http_request_failed, Method, Url, Error}).
 
 
-do_report_error(FullUrl, Method, {error, Error}) ->
-    ?LOG_ERROR("Replicator, request ~s to ~p failed due to error ~p",
-        [Method, FullUrl, Error]);
-
 do_report_error(Url, Method, {code, Code}) ->
     ?LOG_ERROR("Replicator, request ~s to ~p failed. The received "
         "HTTP error code is ~p", [Method, Url, Code]);
 
-do_report_error(Url, Method, {timeout, Timeout}) ->
-    ?LOG_ERROR("Replicator, request ~s to ~p failed. Inactivity timeout "
-        " (~p milliseconds).", [Method, Url, Timeout]).
+do_report_error(FullUrl, Method, Error) ->
+    ?LOG_ERROR("Replicator, request ~s to ~p failed due to error ~p",
+        [Method, FullUrl, error_cause(Error)]).
+
+
+error_cause({error, Cause}) ->
+    Cause;
+error_cause(Cause) ->
+    Cause.
 
 
 stream_data_self(HttpDb, Params, Worker, ReqId, Cb) ->
