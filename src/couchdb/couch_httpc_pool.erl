@@ -63,6 +63,7 @@ handle_call(get_worker, _From,
         url = Url, ssl_options = SslOptions} = State) when Used < Max ->
     {ok, Worker} = ibrowse_http_client:start_link({Conns, Url,
         {SslOptions, SslOptions =/= []}}),
+    true = ets:insert(Conns, {{1, Worker}, []}),
     {reply, {ok, Worker}, State#state{used_connections = Used + 1}};
 
 handle_call(get_worker, _From,
