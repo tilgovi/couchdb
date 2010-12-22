@@ -505,6 +505,8 @@ couchTests.replication = function(debug) {
 
 
   // test create_target option
+  docs = makeDocs(1, 2);
+
   for (i = 0; i < dbPairs.length; i++) {
     populateDb(sourceDb, docs);
     targetDb.deleteDb();
