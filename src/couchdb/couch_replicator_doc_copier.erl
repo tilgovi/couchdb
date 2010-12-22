@@ -107,13 +107,11 @@ handle_call({fetch_doc, {_Id, Revs, _PAs, Seq} = Params}, {Pid, _} = From,
 handle_call({add_doc, Doc}, _From, State) ->
     {reply, ok, maybe_flush_docs(Doc, State)};
 
-handle_call({add_write_stats, Stats}, _From, State) ->
-    #rep_stats{
-        docs_written = W, doc_write_failures = Wf
-    } = S = State#state.stats,
-    NewStats = S#rep_stats{
-        docs_written = W + Stats#rep_stats.docs_written,
-        doc_write_failures = Wf + Stats#rep_stats.doc_write_failures
+handle_call({add_write_stats, Written, Failed}, _From,
+    #state{stats = Stats} = State) ->
+    NewStats = Stats#rep_stats{
+        docs_written = Stats#rep_stats.docs_written + Written,
+        doc_write_failures = Stats#rep_stats.doc_write_failures + Failed
     },
     {reply, ok, State#state{stats = NewStats}};
 
@@ -248,11 +246,8 @@ spawn_writer(Target, DocList) ->
     Pid = spawn_link(
         fun() ->
             {Written, Failed} = flush_docs(Target2, DocList),
-            Stats = #rep_stats{
-                docs_written = Written,
-                doc_write_failures = Failed
-            },
-            ok = gen_server:call(Parent, {add_write_stats, Stats}, infinity)
+            ok = gen_server:call(
+                Parent, {add_write_stats, Written, Failed}, infinity)
         end),
     {Target2, Pid}.
 
