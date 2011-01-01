@@ -16,6 +16,10 @@
 
 -include("couch_db.hrl").
 
+-import(couch_replicator_utils, [
+    open_db/1,
+    close_db/1
+]).
 
 
 start_link(Cp, Target, ChangesQueue, MissingRevsQueue, BatchSize) ->
@@ -35,8 +39,9 @@ missing_revs_finder_loop(Cp, Target, ChangesQueue, RevsQueue, BatchSize) ->
         ok = gen_server:cast(Cp, {report_seq, ReportSeq}),
         IdRevs = [{Id, [Rev || #rev_info{rev = Rev} <- RevsInfo]} ||
                     #doc_info{id = Id, revs = RevsInfo} <- DocInfos],
-        Target2 = reopen_db(Target),
+        Target2 = open_db(Target),
         {ok, Missing} = couch_api_wrap:get_missing_revs(Target2, IdRevs),
+        close_db(Target2),
         queue_missing_revs(Missing, DocInfos, RevsQueue),
         missing_revs_finder_loop(Cp, Target2, ChangesQueue, RevsQueue, BatchSize)
     end.
@@ -78,10 +83,3 @@ non_missing(IdRevsSeqDict, [{MissingId, MissingRevs, _} | Rest]) ->
             dict:store(MissingId, {NotMissing, Seq}, IdRevsSeqDict),
             Rest)
     end.
-
-
-reopen_db(#db{main_pid = Pid, user_ctx = UserCtx}) ->
-    {ok, NewDb} = gen_server:call(Pid, get_db, infinity),
-    NewDb#db{user_ctx = UserCtx};
-reopen_db(HttpDb) ->
-    HttpDb.

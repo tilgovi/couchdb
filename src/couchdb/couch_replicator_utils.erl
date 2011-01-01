@@ -15,6 +15,8 @@
 -export([parse_rep_doc/2]).
 -export([update_rep_doc/2]).
 -export([ensure_rep_db_exists/0]).
+-export([open_db/1, close_db/1]).
+-export([start_db_compaction_notifier/2, stop_db_compaction_notifier/1]).
 
 -include("couch_db.hrl").
 -include("couch_api_wrap.hrl").
@@ -327,3 +329,34 @@ ssl_verify_options(true, _OTPVersion) ->
     [{verify, 2}, {cacertfile, CAFile}];
 ssl_verify_options(false, _OTPVersion) ->
     [{verify, 0}].
+
+
+open_db(#db{name = Name, user_ctx = UserCtx, options = Options}) ->
+    {ok, Db} = couch_db:open(Name, [{user_ctx, UserCtx} | Options]),
+    Db;
+open_db(HttpDb) ->
+    HttpDb.
+
+
+close_db(#db{} = Db) ->
+    couch_db:close(Db);
+close_db(_HttpDb) ->
+    ok.
+
+
+start_db_compaction_notifier(#db{name = DbName}, Server) ->
+    {ok, Notifier} = couch_db_update_notifier:start_link(
+        fun({compacted, DbName1}) when DbName1 =:= DbName ->
+                ok = gen_server:cast(Server, {db_compacted, DbName});
+            (_) ->
+                ok
+        end),
+    Notifier;
+start_db_compaction_notifier(_, _) ->
+    nil.
+
+
+stop_db_compaction_notifier(nil) ->
+    ok;
+stop_db_compaction_notifier(Notifier) ->
+    couch_db_update_notifier:stop(Notifier).

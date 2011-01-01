@@ -28,6 +28,13 @@
 -define(MAX_BULK_ATT_SIZE, 64 * 1024).
 -define(MAX_BULK_ATTS_PER_DOC, 8).
 
+-import(couch_replicator_utils, [
+    open_db/1,
+    close_db/1,
+    start_db_compaction_notifier/2,
+    stop_db_compaction_notifier/1
+]).
+
 -record(state, {
     loop,
     cp,
@@ -41,7 +48,9 @@
     pending_fetch = nil,
     flush_waiter = nil,
     highest_seq_seen = ?LOWEST_SEQ,
-    stats = #rep_stats{}
+    stats = #rep_stats{},
+    source_db_compaction_notifier = nil,
+    target_db_compaction_notifier = nil
 }).
 
 
@@ -61,8 +70,12 @@ init({Cp, Source, Target, MissingRevsQueue, MaxConns}) ->
         cp = Cp,
         max_parallel_conns = MaxConns,
         loop = LoopPid,
-        source = Source,
-        target = Target
+        source = open_db(Source),
+        target = open_db(Target),
+        source_db_compaction_notifier =
+            start_db_compaction_notifier(Source, self()),
+        target_db_compaction_notifier =
+            start_db_compaction_notifier(Target, self())
     },
     {ok, State}.
 
@@ -87,12 +100,11 @@ handle_call({fetch_doc, {_Id, Revs, _PAs, Seq} = Params}, {Pid, _} = From,
     },
     case length(Readers) of
     Size when Size < MaxConns ->
-        {Fetcher, Source2} = spawn_doc_reader(State#state.source, Params),
+        Reader = spawn_doc_reader(State#state.source, Params),
         NewState = State#state{
             highest_seq_seen = lists:max([Seq, HighSeq]),
             stats = Stats2,
-            source = Source2,
-            readers = [Fetcher | Readers]
+            readers = [Reader | Readers]
         },
         {reply, ok, NewState};
     _ ->
@@ -120,13 +132,22 @@ handle_call(flush, {Pid, _} = From,
         target = Target, docs = DocAcc} = State) ->
     State2 = case State#state.readers of
     [] ->
-        {Target2, Writer} = spawn_writer(Target, DocAcc),
-        State#state{writer = Writer, target = Target2};
+        State#state{writer = spawn_writer(Target, DocAcc)};
     _ ->
         State
     end,
     {noreply, State2#state{flush_waiter = From}}.
 
+
+handle_cast({db_compacted, DbName},
+    #state{source = #db{name = DbName} = Source} = State) ->
+    {ok, NewSource} = couch_db:reopen(Source),
+    {noreply, State#state{source = NewSource}};
+
+handle_cast({db_compacted, DbName},
+    #state{target = #db{name = DbName} = Target} = State) ->
+    {ok, NewTarget} = couch_db:reopen(Target),
+    {noreply, State#state{target = NewTarget}};
 
 handle_cast(Msg, State) ->
     {stop, {unexpected_async_call, Msg}, State}.
@@ -161,21 +182,18 @@ handle_info({'EXIT', Pid, normal}, #state{writer = nil} = State) ->
             case (FlushWaiter =/= nil) andalso (Writer =:= nil) andalso
                 (Readers2 =:= [])  of
             true ->
-                {Target2, Writer2} = spawn_writer(Target, Docs),
                 State#state{
                     readers = Readers2,
-                    writer = Writer2,
-                    target = Target2
+                    writer = spawn_writer(Target, Docs)
                 };
             false ->
                 State#state{readers = Readers2}
             end;
         {From, FetchParams} ->
-            {Fetcher, Source2} = spawn_doc_reader(Source, FetchParams),
+            Reader = spawn_doc_reader(Source, FetchParams),
             gen_server:reply(From, ok),
             State#state{
-                source = Source2,
-                readers = [Fetcher | Readers2],
+                readers = [Reader | Readers2],
                 pending_fetch = nil
             }
         end,
@@ -186,8 +204,11 @@ handle_info({'EXIT', Pid, Reason}, State) ->
    {stop, {process_died, Pid, Reason}, State}.
 
 
-terminate(_Reason, _State) ->
-    ok.
+terminate(_Reason, State) ->
+    close_db(State#state.source),
+    close_db(State#state.target),
+    stop_db_compaction_notifier(State#state.source_db_compaction_notifier),
+    stop_db_compaction_notifier(State#state.target_db_compaction_notifier).
 
 
 code_change(_OldVsn, State, _Extra) ->
@@ -222,10 +243,12 @@ queue_fetch_loop(Parent, MissingRevsQueue) ->
 
 
 spawn_doc_reader(Source, FetchParams) ->
-    Source2 = reopen_db(Source),
     Parent = self(),
-    Pid = spawn_link(fun() -> fetch_doc(Parent, Source2, FetchParams) end),
-    {Pid, Source2}.
+    spawn_link(fun() ->
+        Source2 = open_db(Source),
+        fetch_doc(Parent, Source2, FetchParams),
+        close_db(Source2)
+    end).
 
 
 fetch_doc(Parent, Source, {Id, Revs, PAs, _Seq}) ->
@@ -241,15 +264,15 @@ doc_handler(_, Parent) ->
 
 
 spawn_writer(Target, DocList) ->
-    Target2 = reopen_db(Target),
     Parent = self(),
-    Pid = spawn_link(
+    spawn_link(
         fun() ->
+            Target2 = open_db(Target),
             {Written, Failed} = flush_docs(Target2, DocList),
+            close_db(Target2),
             ok = gen_server:call(
                 Parent, {add_write_stats, Written, Failed}, infinity)
-        end),
-    {Target2, Pid}.
+        end).
 
 
 after_full_flush(#state{cp = Cp, stats = Stats, flush_waiter = Waiter,
@@ -268,15 +291,13 @@ after_full_flush(#state{cp = Cp, stats = Stats, flush_waiter = Waiter,
 
 maybe_flush_docs(Doc, #state{target = Target, docs = DocAcc,
         size_docs = SizeAcc, stats = Stats} = State) ->
-    Target2 = reopen_db(Target),
-    {DocAcc2, SizeAcc2, W, F} = maybe_flush_docs(Target2, DocAcc, SizeAcc, Doc),
+    {DocAcc2, SizeAcc2, W, F} = maybe_flush_docs(Target, DocAcc, SizeAcc, Doc),
     Stats2 = Stats#rep_stats{
         docs_read = Stats#rep_stats.docs_read + 1,
         docs_written = Stats#rep_stats.docs_written + W,
         doc_write_failures = Stats#rep_stats.doc_write_failures + F
     },
     State#state{
-        target = Target2,
         stats = Stats2,
         docs = DocAcc2,
         size_docs = SizeAcc2
@@ -340,10 +361,3 @@ flush_docs(Target, Doc) ->
     _ ->
         {0, 1}
     end.
-
-
-reopen_db(#db{main_pid = Pid, user_ctx = UserCtx}) ->
-    {ok, NewDb} = gen_server:call(Pid, get_db, infinity),
-    NewDb#db{user_ctx = UserCtx};
-reopen_db(HttpDb) ->
-    HttpDb.

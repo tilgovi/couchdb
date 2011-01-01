@@ -33,7 +33,9 @@
 ]).
 
 -import(couch_replicator_utils, [
-    update_rep_doc/2
+    update_rep_doc/2,
+    start_db_compaction_notifier/2,
+    stop_db_compaction_notifier/1
 ]).
 
 -record(rep_state, {
@@ -62,8 +64,8 @@
     workers,
     stats = #rep_stats{},
     session_id,
-    source_db_update_notifier = nil,
-    target_db_update_notifier = nil,
+    source_db_compaction_notifier = nil,
+    target_db_compaction_notifier = nil,
     source_monitor = nil,
     target_monitor = nil
 }).
@@ -346,11 +348,13 @@ handle_call(Msg, _From, State) ->
     {stop, unexpected_sync_message, State}.
 
 
-handle_cast(reopen_source_db, #rep_state{source = Source} = State) ->
+handle_cast({db_compacted, DbName},
+    #rep_state{source = #db{name = DbName} = Source} = State) ->
     {ok, NewSource} = couch_db:reopen(Source),
     {noreply, State#rep_state{source = NewSource}};
 
-handle_cast(reopen_target_db, #rep_state{target = Target} = State) ->
+handle_cast({db_compacted, DbName},
+    #rep_state{target = #db{name = DbName} = Target} = State) ->
     {ok, NewTarget} = couch_db:reopen(Target),
     {noreply, State#rep_state{target = NewTarget}};
 
@@ -409,8 +413,8 @@ terminate(Reason, #rep_state{rep_details = Rep} = State) ->
 
 
 terminate_cleanup(State) ->
-    stop_db_update_notifier(State#rep_state.source_db_update_notifier),
-    stop_db_update_notifier(State#rep_state.target_db_update_notifier),
+    stop_db_compaction_notifier(State#rep_state.source_db_compaction_notifier),
+    stop_db_compaction_notifier(State#rep_state.target_db_compaction_notifier),
     couch_api_wrap:db_close(State#rep_state.source),
     couch_api_wrap:db_close(State#rep_state.target).
 
@@ -482,8 +486,10 @@ init_state(Rep) ->
         src_starttime = get_value(<<"instance_start_time">>, SourceInfo),
         tgt_starttime = get_value(<<"instance_start_time">>, TargetInfo),
         session_id = couch_uuids:random(),
-        source_db_update_notifier = source_db_update_notifier(Source),
-        target_db_update_notifier = target_db_update_notifier(Target),
+        source_db_compaction_notifier =
+            start_db_compaction_notifier(Source, self()),
+        target_db_compaction_notifier =
+            start_db_compaction_notifier(Target, self()),
         source_monitor = db_monitor(Source),
         target_monitor = db_monitor(Target)
     },
@@ -688,37 +694,6 @@ sum_stats([Stats1 | RestStats]) ->
             }
         end,
         Stats1, RestStats).
-
-
-source_db_update_notifier(#db{name = DbName}) ->
-    Server = self(),
-    {ok, Notifier} = couch_db_update_notifier:start_link(
-        fun({compacted, DbName1}) when DbName1 =:= DbName ->
-                ok = gen_server:cast(Server, reopen_source_db);
-            (_) ->
-                ok
-        end),
-    Notifier;
-source_db_update_notifier(_) ->
-    nil.
-
-target_db_update_notifier(#db{name = DbName}) ->
-    Server = self(),
-    {ok, Notifier} = couch_db_update_notifier:start_link(
-        fun({compacted, DbName1}) when DbName1 =:= DbName ->
-                ok = gen_server:cast(Server, reopen_target_db);
-            (_) ->
-                ok
-        end),
-    Notifier;
-target_db_update_notifier(_) ->
-    nil.
-
-
-stop_db_update_notifier(nil) ->
-    ok;
-stop_db_update_notifier(Notifier) ->
-    couch_db_update_notifier:stop(Notifier).
 
 
 maybe_set_triggered(#rep{id = {BaseId, _}, doc = {RepProps} = RepDoc}) ->
