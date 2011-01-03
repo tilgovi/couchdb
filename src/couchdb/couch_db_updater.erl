@@ -438,7 +438,7 @@ refresh_validate_doc_funs(Db) ->
 
 flush_trees(_Db, [], AccFlushedTrees) ->
     {ok, lists:reverse(AccFlushedTrees)};
-flush_trees(#db{updater_fd = Fd, header = Header} = Db,
+flush_trees(#db{updater_fd = Fd} = Db,
         [InfoUnflushed | RestUnflushed], AccFlushed) ->
     #full_doc_info{update_seq=UpdateSeq, rev_tree=Unflushed} = InfoUnflushed,
     Flushed = couch_key_tree:map(
@@ -466,12 +466,7 @@ flush_trees(#db{updater_fd = Fd, header = Header} = Db,
                     throw(retry)
                 end,
                 {ok, NewSummaryPointer} =
-                case Header#db_header.disk_version < 4 of
-                true ->
-                    couch_file:append_term(Fd, {Doc#doc.body, DiskAtts});
-                false ->
-                    couch_file:append_term_md5(Fd, {Doc#doc.body, DiskAtts})
-                end,
+                    couch_file:append_term_md5(Fd, {Doc#doc.body, DiskAtts}),
                 {IsDeleted, NewSummaryPointer, UpdateSeq};
             _ ->
                 Value
@@ -490,10 +485,11 @@ merge_rev_trees(Limit, MergeConflicts, [NewDocs|RestDocsList],
         [OldDocInfo|RestOldInfo], AccNewInfos, AccRemoveSeqs, AccSeq) ->
     #full_doc_info{id=Id,rev_tree=OldTree,deleted=OldDeleted,update_seq=OldSeq}
             = OldDocInfo,
-    NewRevTree0 = lists:foldl(
+    NewRevTree = lists:foldl(
         fun({Client, #doc{revs={Pos,[_Rev|PrevRevs]}}=NewDoc}, AccTree) ->
             if not MergeConflicts ->
-                case couch_key_tree:merge(AccTree, couch_doc:to_path(NewDoc)) of
+                case couch_key_tree:merge(AccTree, couch_doc:to_path(NewDoc),
+                    Limit) of
                 {_NewTree, conflicts} when (not OldDeleted) ->
                     send_result(Client, Id, {Pos-1,PrevRevs}, conflict),
                     AccTree;
@@ -524,7 +520,7 @@ merge_rev_trees(Limit, MergeConflicts, [NewDocs|RestDocsList],
                                 NewDoc#doc{revs={OldPos, [OldRev]}}),
                         NewDoc2 = NewDoc#doc{revs={OldPos + 1, [NewRevId, OldRev]}},
                         {NewTree2, _} = couch_key_tree:merge(AccTree,
-                                couch_doc:to_path(NewDoc2)),
+                                couch_doc:to_path(NewDoc2), Limit),
                         % we changed the rev id, this tells the caller we did
                         send_result(Client, Id, {Pos-1,PrevRevs},
                                 {ok, {OldPos + 1, NewRevId}}),
@@ -538,12 +534,11 @@ merge_rev_trees(Limit, MergeConflicts, [NewDocs|RestDocsList],
                 end;
             true ->
                 {NewTree, _} = couch_key_tree:merge(AccTree,
-                            couch_doc:to_path(NewDoc)),
+                            couch_doc:to_path(NewDoc), Limit),
                 NewTree
             end
         end,
         OldTree, NewDocs),
-    NewRevTree = couch_key_tree:stem(NewRevTree0, Limit),
     if NewRevTree == OldTree ->
         % nothing changed
         merge_rev_trees(Limit, MergeConflicts, RestDocsList, RestOldInfo,
@@ -618,16 +613,19 @@ update_docs_int(Db, DocsList, NonRepDocs, MergeConflicts, FullCommit) ->
 
     % Check if we just updated any design documents, and update the validation
     % funs if we did.
-    case [1 || <<"_design/",_/binary>> <- Ids] of
-    [] ->
+    case lists:any(
+        fun(<<"_design/", _/binary>>) -> true; (_) -> false end, Ids) of
+    false ->
         Db4 = Db3;
-    _ ->
+    true ->
         Db4 = refresh_validate_doc_funs(Db3)
     end,
 
     {ok, commit_data(Db4, not FullCommit)}.
 
 
+update_local_docs(Db, []) ->
+    {ok, Db};
 update_local_docs(#db{local_docs_btree=Btree}=Db, Docs) ->
     Ids = [Id || {_Client, #doc{id=Id}} <- Docs],
     OldDocLookups = couch_btree:lookup(Btree, Ids),
