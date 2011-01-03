@@ -35,14 +35,17 @@
     stop_db_compaction_notifier/1
 ]).
 
+-record(batch, {
+    docs = [],
+    size = 0
+}).
+
 -record(state, {
     loop,
     cp,
     max_parallel_conns,
     source,
     target,
-    docs = [],
-    size_docs = 0,
     readers = [],
     writer = nil,
     pending_fetch = nil,
@@ -50,10 +53,16 @@
     highest_seq_seen = ?LOWEST_SEQ,
     stats = #rep_stats{},
     source_db_compaction_notifier = nil,
-    target_db_compaction_notifier = nil
+    target_db_compaction_notifier = nil,
+    batch = #batch{}
 }).
 
 
+
+start_link(Cp, #db{} = Source, Target, MissingRevsQueue, _MaxConns) ->
+    Pid = spawn_link(
+        fun() -> queue_fetch_loop(Source, Target, Cp, MissingRevsQueue) end),
+    {ok, Pid};
 
 start_link(Cp, Source, Target, MissingRevsQueue, MaxConns) ->
     gen_server:start_link(
@@ -64,7 +73,7 @@ init({Cp, Source, Target, MissingRevsQueue, MaxConns}) ->
     process_flag(trap_exit, true),
     Parent = self(),
     LoopPid = spawn_link(
-        fun() -> queue_fetch_loop(Parent, MissingRevsQueue) end
+        fun() -> queue_fetch_loop(Source, Target, Parent, MissingRevsQueue) end
     ),
     State = #state{
         cp = Cp,
@@ -129,10 +138,10 @@ handle_call({add_write_stats, Written, Failed}, _From,
 
 handle_call(flush, {Pid, _} = From,
     #state{loop = Pid, writer = nil, flush_waiter = nil,
-        target = Target, docs = DocAcc} = State) ->
+        target = Target, batch = Batch} = State) ->
     State2 = case State#state.readers of
     [] ->
-        State#state{writer = spawn_writer(Target, DocAcc)};
+        State#state{writer = spawn_writer(Target, Batch)};
     _ ->
         State
     end,
@@ -155,7 +164,7 @@ handle_cast(Msg, State) ->
 
 handle_info({'EXIT', Pid, normal}, #state{loop = Pid} = State) ->
     #state{
-        docs = [], readers = [], writer = nil,
+        batch = #batch{docs = []}, readers = [], writer = nil,
         pending_fetch = nil, flush_waiter = nil
     } = State,
     {stop, normal, State};
@@ -169,7 +178,7 @@ handle_info({'EXIT', Pid, normal},
 
 handle_info({'EXIT', Pid, normal}, #state{writer = nil} = State) ->
     #state{
-        readers = Readers, writer = Writer, docs = Docs,
+        readers = Readers, writer = Writer, batch = Batch,
         source = Source, target = Target,
         pending_fetch = Fetch, flush_waiter = FlushWaiter
     } = State,
@@ -184,7 +193,7 @@ handle_info({'EXIT', Pid, normal}, #state{writer = nil} = State) ->
             true ->
                 State#state{
                     readers = Readers2,
-                    writer = spawn_writer(Target, Docs)
+                    writer = spawn_writer(Target, Batch)
                 };
             false ->
                 State#state{readers = Readers2}
@@ -215,55 +224,105 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 
-queue_fetch_loop(Parent, MissingRevsQueue) ->
+queue_fetch_loop(Source, Target, Parent, MissingRevsQueue) ->
     case couch_work_queue:dequeue(MissingRevsQueue, 1) of
     closed ->
         ok;
     {ok, [IdRevs]} ->
-        lists:foreach(
-            fun({Seq, {Id, Revs, NotMissingCount, PAs}}) ->
-                case NotMissingCount > 0 of
-                true ->
-                    ok = gen_server:call(
-                        Parent, {seq_done, Seq, NotMissingCount}, infinity);
-                false ->
-                    ok
-                end,
-                lists:foreach(
-                    fun(R) ->
-                        ok = gen_server:call(
-                            Parent, {fetch_doc, {Id, [R], PAs, Seq}}, infinity)
-                    end,
-                    Revs)
-            end,
-            IdRevs),
-        ok = gen_server:call(Parent, flush, infinity),
-        queue_fetch_loop(Parent, MissingRevsQueue)
+        case Source of
+        #db{} ->
+            Source2 = open_db(Source),
+            Target2 = open_db(Target),
+            {Stats, HighSeqDone} = local_process_batch(
+                IdRevs, Source2, Target2, #batch{}, #rep_stats{}, ?LOWEST_SEQ),
+            close_db(Source2),
+            close_db(Target2),
+            ok = gen_server:cast(Parent, {report_seq_done, HighSeqDone, Stats});
+        #httpdb{} ->
+            remote_process_batch(IdRevs, Parent)
+        end,
+        queue_fetch_loop(Source, Target, Parent, MissingRevsQueue)
     end.
+
+
+local_process_batch([], _Source, Target, #batch{docs = Docs},
+    Stats, HighestSeqDone) ->
+    {Written, WriteFailures} = flush_docs(Target, Docs),
+    Stats2 = Stats#rep_stats{
+        docs_written = Stats#rep_stats.docs_written + Written,
+        doc_write_failures = Stats#rep_stats.doc_write_failures + WriteFailures
+    },
+    {Stats2, HighestSeqDone};
+
+local_process_batch([{Seq, {Id, Revs, NotMissingCount, PAs}} | Rest],
+    Source, Target, Batch, Stats, HighestSeqSeen) ->
+    {ok, DocList} = fetch_doc(
+        Source, {Id, Revs, PAs, Seq}, fun local_doc_handler/2, []),
+    {Batch2, Written, WriteFailures} = lists:foldl(
+        fun(Doc, {Batch0, W0, F0}) ->
+            {Batch1, W, F} = maybe_flush_docs(Target, Batch0, Doc),
+            {Batch1, W0 + W, F0 + F}
+        end,
+        {Batch, 0, 0}, DocList),
+    Stats2 = Stats#rep_stats{
+        missing_checked = Stats#rep_stats.missing_checked + length(Revs)
+            + NotMissingCount,
+        missing_found = Stats#rep_stats.missing_found + length(Revs),
+        docs_read = Stats#rep_stats.docs_read + length(DocList),
+        docs_written = Stats#rep_stats.docs_written + Written,
+        doc_write_failures = Stats#rep_stats.doc_write_failures + WriteFailures
+    },
+    local_process_batch(
+        Rest, Source, Target, Batch2, Stats2, lists:max([Seq, HighestSeqSeen])).
+
+
+remote_process_batch([], Parent) ->
+    ok = gen_server:call(Parent, flush, infinity);
+
+remote_process_batch([{Seq, {Id, Revs, NotMissing, PAs}} | Rest], Parent) ->
+    case NotMissing > 0 of
+    true ->
+        ok = gen_server:call(Parent, {seq_done, Seq, NotMissing}, infinity);
+    false ->
+        ok
+    end,
+    lists:foreach(
+        fun(Rev) ->
+            ok = gen_server:call(
+                Parent, {fetch_doc, {Id, [Rev], PAs, Seq}}, infinity)
+        end,
+        Revs),
+    remote_process_batch(Rest, Parent).
 
 
 spawn_doc_reader(Source, FetchParams) ->
     Parent = self(),
     spawn_link(fun() ->
         Source2 = open_db(Source),
-        fetch_doc(Parent, Source2, FetchParams),
+        fetch_doc(Source2, FetchParams, fun remote_doc_handler/2, Parent),
         close_db(Source2)
     end).
 
 
-fetch_doc(Parent, Source, {Id, Revs, PAs, _Seq}) ->
+fetch_doc(Source, {Id, Revs, PAs, _Seq}, DocHandler, Acc) ->
     couch_api_wrap:open_doc_revs(
-        Source, Id, Revs, [{atts_since, PAs}], fun doc_handler/2, Parent).
+        Source, Id, Revs, [{atts_since, PAs}], DocHandler, Acc).
 
 
-doc_handler({ok, Doc}, Parent) ->
+local_doc_handler({ok, Doc}, DocList) ->
+    [Doc | DocList];
+local_doc_handler(_, DocList) ->
+    DocList.
+
+
+remote_doc_handler({ok, Doc}, Parent) ->
     ok = gen_server:call(Parent, {add_doc, Doc}, infinity),
     Parent;
-doc_handler(_, Parent) ->
+remote_doc_handler(_, Parent) ->
     Parent.
 
 
-spawn_writer(Target, DocList) ->
+spawn_writer(Target, #batch{docs = DocList}) ->
     Parent = self(),
     spawn_link(
         fun() ->
@@ -283,15 +342,14 @@ after_full_flush(#state{cp = Cp, stats = Stats, flush_waiter = Waiter,
         stats = #rep_stats{},
         flush_waiter = nil,
         writer = nil,
-        docs = [],
-        size_docs = 0,
+        batch = #batch{},
         highest_seq_seen = ?LOWEST_SEQ
     }.
 
 
-maybe_flush_docs(Doc, #state{target = Target, docs = DocAcc,
-        size_docs = SizeAcc, stats = Stats} = State) ->
-    {DocAcc2, SizeAcc2, W, F} = maybe_flush_docs(Target, DocAcc, SizeAcc, Doc),
+maybe_flush_docs(Doc, #state{target = Target, batch = Batch,
+        stats = Stats} = State) ->
+    {Batch2, W, F} = maybe_flush_docs(Target, Batch, Doc),
     Stats2 = Stats#rep_stats{
         docs_read = Stats#rep_stats.docs_read + 1,
         docs_written = Stats#rep_stats.docs_written + W,
@@ -299,43 +357,47 @@ maybe_flush_docs(Doc, #state{target = Target, docs = DocAcc,
     },
     State#state{
         stats = Stats2,
-        docs = DocAcc2,
-        size_docs = SizeAcc2
+        batch = Batch2
     }.
 
 
-maybe_flush_docs(#httpdb{} = Target, DocAcc, SizeAcc, #doc{atts = Atts} = Doc) ->
+maybe_flush_docs(#httpdb{} = Target,
+    #batch{docs = DocAcc, size = SizeAcc} = Batch, #doc{atts = Atts} = Doc) ->
     case (length(Atts) > ?MAX_BULK_ATTS_PER_DOC) orelse
         lists:any(
             fun(A) -> A#att.disk_len > ?MAX_BULK_ATT_SIZE end, Atts) of
     true ->
         {Written, Failed} = flush_docs(Target, Doc),
-        {DocAcc, SizeAcc, Written, Failed};
+        {Batch, Written, Failed};
     false ->
         JsonDoc = iolist_to_binary(
             ?JSON_ENCODE(couch_doc:to_json_obj(Doc, [revs, attachments]))),
         case SizeAcc + byte_size(JsonDoc) of
         SizeAcc2 when SizeAcc2 > ?DOC_BUFFER_BYTE_SIZE ->
             {Written, Failed} = flush_docs(Target, [JsonDoc | DocAcc]),
-            {[], 0, Written, Failed};
+            {#batch{}, Written, Failed};
         SizeAcc2 ->
-            {[JsonDoc | DocAcc], SizeAcc2, 0, 0}
+            {#batch{docs = [JsonDoc | DocAcc], size = SizeAcc2}, 0, 0}
         end
     end;
 
-maybe_flush_docs(#db{} = Target, DocAcc, SizeAcc, #doc{atts = []} = Doc) ->
+maybe_flush_docs(#db{} = Target, #batch{docs = DocAcc, size = SizeAcc},
+    #doc{atts = []} = Doc) ->
     case SizeAcc + 1 of
     SizeAcc2 when SizeAcc2 >= ?DOC_BUFFER_LEN ->
         {Written, Failed} = flush_docs(Target, [Doc | DocAcc]),
-        {[], 0, Written, Failed};
+        {#batch{}, Written, Failed};
     SizeAcc2 ->
-        {[Doc | DocAcc], SizeAcc2, 0, 0}
+        {#batch{docs = [Doc | DocAcc], size = SizeAcc2}, 0, 0}
     end;
 
-maybe_flush_docs(#db{} = Target, DocAcc, SizeAcc, Doc) ->
+maybe_flush_docs(#db{} = Target, Batch, Doc) ->
     {Written, Failed} = flush_docs(Target, Doc),
-    {DocAcc, SizeAcc, Written, Failed}.
+    {Batch, Written, Failed}.
 
+
+flush_docs(_Target, []) ->
+    {0, 0};
 
 flush_docs(Target, DocList) when is_list(DocList) ->
     {ok, Errors} = couch_api_wrap:update_docs(
