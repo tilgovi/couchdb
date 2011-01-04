@@ -101,7 +101,7 @@ handle_call({seq_done, Seq, RevCount}, {Pid, _},
 
 handle_call({fetch_doc, {_Id, Revs, _PAs, Seq} = Params}, {Pid, _} = From,
     #state{loop = Pid, readers = Readers, pending_fetch = nil,
-        highest_seq_seen = HighSeq, stats = Stats,
+        highest_seq_seen = HighSeq, stats = Stats, source = Src, target = Tgt,
         max_parallel_conns = MaxConns} = State) ->
     Stats2 = Stats#rep_stats{
         missing_checked = Stats#rep_stats.missing_checked + length(Revs),
@@ -109,7 +109,7 @@ handle_call({fetch_doc, {_Id, Revs, _PAs, Seq} = Params}, {Pid, _} = From,
     },
     case length(Readers) of
     Size when Size < MaxConns ->
-        Reader = spawn_doc_reader(State#state.source, Params),
+        Reader = spawn_doc_reader(Src, Tgt, Params),
         NewState = State#state{
             highest_seq_seen = lists:max([Seq, HighSeq]),
             stats = Stats2,
@@ -125,8 +125,22 @@ handle_call({fetch_doc, {_Id, Revs, _PAs, Seq} = Params}, {Pid, _} = From,
         {noreply, NewState}
     end;
 
-handle_call({add_doc, Doc}, _From, State) ->
+handle_call({batch_doc, Doc}, _From, State) ->
     {reply, ok, maybe_flush_docs(Doc, State)};
+
+handle_call({doc_flushed, true}, _From, #state{stats = Stats} = State) ->
+    NewStats = Stats#rep_stats{
+        docs_read = Stats#rep_stats.docs_read + 1,
+        docs_written = Stats#rep_stats.docs_written + 1
+    },
+    {reply, ok, State#state{stats = NewStats}};
+
+handle_call({doc_flushed, false}, _From, #state{stats = Stats} = State) ->
+    NewStats = Stats#rep_stats{
+        docs_read = Stats#rep_stats.docs_read + 1,
+        doc_write_failures = Stats#rep_stats.doc_write_failures + 1
+    },
+    {reply, ok, State#state{stats = NewStats}};
 
 handle_call({add_write_stats, Written, Failed}, _From,
     #state{stats = Stats} = State) ->
@@ -199,7 +213,7 @@ handle_info({'EXIT', Pid, normal}, #state{writer = nil} = State) ->
                 State#state{readers = Readers2}
             end;
         {From, FetchParams} ->
-            Reader = spawn_doc_reader(Source, FetchParams),
+            Reader = spawn_doc_reader(Source, Target, FetchParams),
             gen_server:reply(From, ok),
             State#state{
                 readers = [Reader | Readers2],
@@ -286,6 +300,10 @@ remote_process_batch([{Seq, {Id, Revs, NotMissing, PAs}} | Rest], Parent) ->
     false ->
         ok
     end,
+    % When the source is a remote database, we fetch a single document revision
+    % per HTTP request. This is mostly to facilitate retrying of HTTP requests
+    % due to network transient failures. It also helps not exceeding the maximum
+    % URL length allowed by proxies and Mochiweb.
     lists:foreach(
         fun(Rev) ->
             ok = gen_server:call(
@@ -295,11 +313,12 @@ remote_process_batch([{Seq, {Id, Revs, NotMissing, PAs}} | Rest], Parent) ->
     remote_process_batch(Rest, Parent).
 
 
-spawn_doc_reader(Source, FetchParams) ->
+spawn_doc_reader(Source, Target, FetchParams) ->
     Parent = self(),
     spawn_link(fun() ->
         Source2 = open_db(Source),
-        fetch_doc(Source2, FetchParams, fun remote_doc_handler/2, Parent),
+        fetch_doc(
+            Source2, FetchParams, fun remote_doc_handler/2, {Parent, Target}),
         close_db(Source2)
     end).
 
@@ -315,11 +334,21 @@ local_doc_handler(_, DocList) ->
     DocList.
 
 
-remote_doc_handler({ok, Doc}, Parent) ->
-    ok = gen_server:call(Parent, {add_doc, Doc}, infinity),
-    Parent;
-remote_doc_handler(_, Parent) ->
-    Parent.
+remote_doc_handler({ok, #doc{atts = []} = Doc}, {Parent, _} = Acc) ->
+    ok = gen_server:call(Parent, {batch_doc, Doc}, infinity),
+    Acc;
+remote_doc_handler({ok, Doc}, {Parent, Target} = Acc) ->
+    % Immediately flush documents with attachments received from a remote
+    % source. The data property of each attachment is a function that starts
+    % streaming the attachment data from the remote source, therefore it's
+    % convenient to call it ASAP to avoid ibrowse inactivity timeouts.
+    Target2 = open_db(Target),
+    Success = (flush_doc(Target2, Doc) =:= ok),
+    ok = gen_server:call(Parent, {doc_flushed, Success}, infinity),
+    close_db(Target2),
+    Acc;
+remote_doc_handler(_, Acc) ->
+    Acc.
 
 
 spawn_writer(Target, #batch{docs = DocList}) ->
@@ -367,8 +396,12 @@ maybe_flush_docs(#httpdb{} = Target,
         lists:any(
             fun(A) -> A#att.disk_len > ?MAX_BULK_ATT_SIZE end, Atts) of
     true ->
-        {Written, Failed} = flush_docs(Target, Doc),
-        {Batch, Written, Failed};
+        case flush_doc(Target, Doc) of
+        ok ->
+            {Batch, 1, 0};
+        error ->
+            {Batch, 0, 1}
+        end;
     false ->
         JsonDoc = iolist_to_binary(
             ?JSON_ENCODE(couch_doc:to_json_obj(Doc, [revs, attachments]))),
@@ -392,8 +425,12 @@ maybe_flush_docs(#db{} = Target, #batch{docs = DocAcc, size = SizeAcc},
     end;
 
 maybe_flush_docs(#db{} = Target, Batch, Doc) ->
-    {Written, Failed} = flush_docs(Target, Doc),
-    {Batch, Written, Failed}.
+    case flush_doc(Target, Doc) of
+    ok ->
+        {Batch, 1, 0};
+    error ->
+        {Batch, 0, 1}
+    end.
 
 
 flush_docs(_Target, []) ->
@@ -410,16 +447,16 @@ flush_docs(Target, DocList) when is_list(DocList) ->
             (_) ->
                 ok
         end, Errors),
-    {length(DocList) - length(Errors), length(Errors)};
+    {length(DocList) - length(Errors), length(Errors)}.
 
-flush_docs(Target, Doc) ->
+flush_doc(Target, Doc) ->
     case couch_api_wrap:update_doc(Target, Doc, [], replicated_changes) of
     {ok, _} ->
-        {1, 0};
+        ok;
     {error, <<"unauthorized">>} ->
         ?LOG_ERROR("Replicator: unauthorized to write document `~s` to `~s`",
             [Doc#doc.id, couch_api_wrap:db_uri(Target)]),
-        {0, 1};
+        error;
     _ ->
-        {0, 1}
+        error
     end.
