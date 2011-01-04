@@ -66,8 +66,8 @@ send_ibrowse_req(#httpdb{headers = BaseHeaders} = HttpDb, Params) ->
         % Direct means no usage of HTTP pipeline. As section 8.1.2.2 of
         % RFC 2616 says, clients should not pipeline non-idempotent requests.
         % Let the caller explicitly say which requests are not idempotent.
-        % For e.g. POSTs against "/some_db/_revs_diff" are idempotent, are
-        % idempotent (despite the verb not being GET).
+        % For e.g. POSTs against "/some_db/_revs_diff" are idempotent
+        % (despite the verb not being GET).
         case get_value(direct, Params, false) of
         true ->
             {ok, Pid} = couch_httpc_pool:get_worker(HttpDb#httpdb.httpc_pool),
