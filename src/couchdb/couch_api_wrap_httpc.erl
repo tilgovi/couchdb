@@ -31,49 +31,69 @@
 
 setup(#httpdb{httpc_pool = nil, url = Url, ibrowse_options = IbrowseOptions,
     http_connections = MaxConns, http_pipeline_size = PipeSize} = Db) ->
+    HttpcPoolOptions = [
+        {ssl_options, get_value(ssl_options, IbrowseOptions, [])},
+        {max_piped_connections, MaxConns},
+        {pipeline_size, PipeSize}
+    ],
     {ok, Pid} = couch_httpc_pool:start_link(
-        ibrowse_lib:parse_url(Url), get_value(ssl_options, IbrowseOptions, []),
-        MaxConns, PipeSize),
+        ibrowse_lib:parse_url(Url), HttpcPoolOptions),
     {ok, Db#httpdb{httpc_pool = Pid}}.
 
 
-send_req(#httpdb{headers = BaseHeaders} = HttpDb, Params1, Callback) ->
+send_req(HttpDb, Params1, Callback) ->
     Params2 = ?replace(Params1, qs,
         [{K, ?b2l(iolist_to_binary(V))} || {K, V} <- get_value(qs, Params1, [])]),
     Params = ?replace(Params2, ibrowse_options,
         lists:keysort(1, get_value(ibrowse_options, Params2, []))),
-    Method = get_value(method, Params, get),
-    UserHeaders = lists:keysort(1, get_value(headers, Params, [])),
-    Headers1 = lists:ukeymerge(1, UserHeaders, BaseHeaders),
-    Body = get_value(body, Params, []),
-    IbrowseOptions = [
-        {response_format, binary}, {inactivity_timeout, HttpDb#httpdb.timeout} |
-        lists:ukeymerge(1, get_value(ibrowse_options, Params, []),
-            HttpDb#httpdb.ibrowse_options)
-    ],
-    Headers2 = oauth_header(HttpDb, Params) ++ Headers1,
-    Url = full_url(HttpDb, Params),
-    case get_value(direct, Params, false) of
-    true ->
-        {ok, Pid} = ibrowse:spawn_link_worker_process(Url),
-        Worker = {direct, Pid},
-        Response = ibrowse:send_req_direct(
-            Pid, Url, Headers2, Method, Body, IbrowseOptions, infinity);
-    false ->
-        Worker = get_pool_worker(HttpDb),
-        Response = ibrowse:send_req_direct(
-            Worker, Url, Headers2, Method, Body, IbrowseOptions, infinity)
-    end,
+    {Worker, Response} = send_ibrowse_req(HttpDb, Params),
     process_response(Response, Worker, HttpDb, Params, Callback).
 
 
-get_pool_worker(#httpdb{httpc_pool = Pool} = HttpDb) ->
-    case couch_httpc_pool:get_worker(Pool) of
+send_ibrowse_req(#httpdb{headers = BaseHeaders} = HttpDb, Params) ->
+    Method = get_value(method, Params, get),
+    UserHeaders = lists:keysort(1, get_value(headers, Params, [])),
+    Headers1 = lists:ukeymerge(1, UserHeaders, BaseHeaders),
+    Headers2 = oauth_header(HttpDb, Params) ++ Headers1,
+    Url = full_url(HttpDb, Params),
+    Body = get_value(body, Params, []),
+    {{_Type, WorkerPid} = Worker, InactivityTimeout} =
+    case get_value(path, Params) of
+    "_changes" ->
+        {ok, Pid} = ibrowse:spawn_link_worker_process(Url),
+        {{ibrowse_direct, Pid}, infinity};
+    _ ->
+        % Direct means no usage of HTTP pipeline. As section 8.1.2.2 of
+        % RFC 2616 says, clients should not pipeline non-idempotent requests.
+        % Let the caller explicitly say which requests are not idempotent.
+        % For e.g. POSTs against "/some_db/_revs_diff" are idempotent, are
+        % idempotent (despite the verb not being GET).
+        case get_value(direct, Params, false) of
+        true ->
+            {ok, Pid} = couch_httpc_pool:get_worker(HttpDb#httpdb.httpc_pool),
+            {{direct, Pid}, HttpDb#httpdb.timeout};
+        false ->
+            Pid = get_piped_worker(HttpDb),
+            {{piped, Pid}, HttpDb#httpdb.timeout}
+        end
+    end,
+    IbrowseOptions = [
+        {response_format, binary}, {inactivity_timeout, InactivityTimeout} |
+        lists:ukeymerge(1, get_value(ibrowse_options, Params, []),
+            HttpDb#httpdb.ibrowse_options)
+    ],
+    Response = ibrowse:send_req_direct(
+        WorkerPid, Url, Headers2, Method, Body, IbrowseOptions, infinity),
+    {Worker, Response}.
+
+
+get_piped_worker(#httpdb{httpc_pool = Pool} = HttpDb) ->
+    case couch_httpc_pool:get_piped_worker(Pool) of
     {ok, Worker} ->
         Worker;
     retry_later ->
         ok = timer:sleep(?RETRY_LATER_WAIT),
-        get_pool_worker(HttpDb)
+        get_piped_worker(HttpDb)
     end.
 
 
@@ -131,11 +151,13 @@ process_stream_response(ReqId, Worker, HttpDb, Params, Callback) ->
     end.
 
 
-stop_worker({direct, Worker}, _HttpDb) ->
+stop_worker({ibrowse_direct, Worker}, _HttpDb) ->
     unlink(Worker),
     receive {'EXIT', Worker, _} -> ok after 0 -> ok end,
     catch ibrowse:stop_worker_process(Worker);
-stop_worker(_Worker, _HttpDb) ->
+stop_worker({direct, Worker}, #httpdb{httpc_pool = Pool}) ->
+    ok = couch_httpc_pool:release_worker(Pool, Worker);
+stop_worker({piped, _Worker}, _HttpDb) ->
     ok.
 
 

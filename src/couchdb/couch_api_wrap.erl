@@ -69,7 +69,7 @@ db_open(#httpdb{} = Db1, _Options, Create) ->
     false ->
         ok;
     true ->
-        send_req(Db, [{method, put}], fun(_, _, _) -> ok end)
+        send_req(Db, [{method, put}, {direct, true}], fun(_, _, _) -> ok end)
     end,
     send_req(Db, [{method, head}],
         fun(200, _, _) ->
@@ -120,7 +120,7 @@ get_db_info(Db) ->
 ensure_full_commit(#httpdb{} = Db) ->
     send_req(
         Db,
-        [{method, post}, {path, "_ensure_full_commit"},
+        [{method, post}, {path, "_ensure_full_commit"}, {direct, true},
             {headers, [{"Content-Type", "application/json"}]}],
         fun(201, _, {Props}) ->
             {ok, get_value(<<"instance_start_time">>, Props)}
@@ -221,7 +221,7 @@ update_doc(#httpdb{} = HttpDb, #doc{id = DocId} = Doc, Options, Type) ->
     Body = {fun stream_doc/1, {JsonBytes, Doc#doc.atts, Boundary, Len}},
     send_req(
         HttpDb,
-        [{method, put}, {path, encode_doc_id(DocId)},
+        [{method, put}, {path, encode_doc_id(DocId)}, {direct, true},
             {qs, QArgs}, {headers, Headers}, {body, Body}],
         fun(Code, _, {Props}) when Code =:= 200 orelse Code =:= 201 ->
                 {ok, couch_doc:parse_rev(get_value(<<"rev">>, Props))};
@@ -267,7 +267,7 @@ update_docs(#httpdb{} = HttpDb, DocList, Options, UpdateType) ->
     end,
     send_req(
         HttpDb,
-        [{method, post}, {path, "_bulk_docs"},
+        [{method, post}, {path, "_bulk_docs"}, {direct, true},
             {body, {BodyFun, [Prefix1 | DocList]}},
             {ibrowse_options, [{transfer_encoding, chunked}]},
             {headers, [
@@ -298,10 +298,8 @@ changes_since(#httpdb{headers = Headers1} = HttpDb, Style, StartSeq,
         {[{"filter", "_doc_ids"} | BaseQArgs], post, JsonDocIds, Headers2}
     end,
     send_req(
-        % Shouldn't be infinity, but somehow if it's not, issues arise
-        % frequently with ibrowse.
-        HttpDb#httpdb{timeout = infinity},
-        [{method, Method}, {path, "_changes"}, {qs, QArgs}, {direct, true},
+        HttpDb,
+        [{method, Method}, {path, "_changes"}, {qs, QArgs},
             {headers, Headers}, {body, Body},
             {ibrowse_options, [{stream_to, {self(), once}}]}],
         fun(200, _, DataStreamFun) ->
