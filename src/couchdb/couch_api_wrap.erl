@@ -167,7 +167,7 @@ open_doc_revs(#httpdb{} = HttpDb, Id, Revs, Options, Fun, Acc) ->
                     ]}],
                 fun(200, Headers, StreamDataFun) ->
                     Self ! started,
-                    couch_httpd:parse_multipart_request(
+                    {<<"--">>, _, _} = couch_httpd:parse_multipart_request(
                         get_value("Content-Type", Headers),
                         StreamDataFun,
                         fun mp_parse_mixed/1)
@@ -456,8 +456,8 @@ receive_docs(Streamer, UserFun, UserAcc) ->
     {headers, Headers} ->
         case get_value("content-type", Headers) of
         {"multipart/related", _} = ContentType ->
-            case couch_doc:doc_from_multi_part_stream(ContentType,
-                fun() -> receive_doc_data(Streamer) end) of
+            case doc_from_multi_part_stream(
+                ContentType, fun() -> receive_doc_data(Streamer) end) of
             {ok, Doc} ->
                 UserAcc2 = UserFun({ok, Doc}, UserAcc),
                 receive_docs(Streamer, UserFun, UserAcc2)
@@ -493,8 +493,6 @@ receive_all(Streamer, Acc) ->
 receive_doc_data(Streamer) ->
     Streamer ! {next_bytes, self()},
     receive
-    started ->
-        throw(restart);
     {body_bytes, Bytes} ->
         {Bytes, fun() -> receive_doc_data(Streamer) end};
     body_done ->
@@ -523,6 +521,46 @@ mp_parse_mixed(body_end) ->
         self() ! {get_headers, From}
     end,
     fun mp_parse_mixed/1.
+
+
+% It's almost the same version as in the couch_doc module.
+% TODO: improve this.
+doc_from_multi_part_stream(ContentType, DataFun) ->
+    Self = self(),
+    Parser = spawn_link(fun() ->
+        {<<"--">>, _, _} = couch_httpd:parse_multipart_request(
+            ContentType, DataFun,
+            fun(Next) -> couch_doc:mp_parse_doc(Next, []) end),
+        unlink(Self)
+        end),
+    Parser ! {get_doc_bytes, self()},
+    receive
+    started ->
+        unlink(Parser),
+        exit(Parser, kill),
+        throw(restart);
+    {doc_bytes, DocBytes} ->
+        Doc = couch_doc:from_json_obj(?JSON_DECODE(DocBytes)),
+        ReadAttachmentDataFun = fun() ->
+            Parser ! {get_bytes, self()},
+            receive
+            started ->
+                unlink(Parser),
+                exit(Parser, kill),
+                throw(restart);
+            {bytes, Bytes} ->
+                Bytes
+            end
+        end,
+        Atts2 = lists:map(
+            fun(#att{data = follows} = A) ->
+                A#att{data = ReadAttachmentDataFun};
+            (A) ->
+                A
+            end, Doc#doc.atts),
+        {ok, Doc#doc{atts = Atts2}}
+    end.
+
 
 changes_ev1(object_start, UserFun, UserAcc) ->
     fun(Ev) -> changes_ev2(Ev, UserFun, UserAcc) end.

@@ -119,7 +119,11 @@ process_response({ok, Code, Headers, Body}, Worker, HttpDb, Params, Callback) ->
         Json ->
             ?JSON_DECODE(Json)
         end,
-        Callback(Ok, Headers, EJson);
+        try
+            Callback(Ok, Headers, EJson)
+        catch Tag:Err ->
+            maybe_retry({Tag, Err}, Worker, HttpDb, Params, Callback)
+        end;
     R when R =:= 301 ; R =:= 302 ; R =:= 303 ->
         do_redirect(Worker, R, Headers, HttpDb, Params, Callback);
     Error ->
@@ -138,9 +142,15 @@ process_stream_response(ReqId, Worker, HttpDb, Params, Callback) ->
             StreamDataFun = fun() ->
                 stream_data_self(HttpDb, Params, Worker, ReqId, Callback)
             end,
-            Ret = Callback(Ok, Headers, StreamDataFun),
-            stop_worker(Worker, HttpDb),
-            Ret;
+            try
+                Ret = Callback(Ok, Headers, StreamDataFun),
+                stop_worker(Worker, HttpDb),
+                receive {ibrowse_async_response_end, ReqId} -> ok
+                after 0 -> ok end,
+                Ret
+            catch Tag:Err ->
+                maybe_retry({Tag, Err}, Worker, HttpDb, Params, Callback)
+            end;
         R when R =:= 301 ; R =:= 302 ; R =:= 303 ->
             do_redirect(Worker, R, Headers, HttpDb, Params, Callback);
         Error ->
@@ -169,7 +179,7 @@ maybe_retry(Error, Worker, #httpdb{retries = Retries, wait = Wait} = HttpDb,
     stop_worker(Worker, HttpDb),
     Method = string:to_upper(atom_to_list(get_value(method, Params, get))),
     Url = couch_util:url_strip_password(full_url(HttpDb, Params)),
-    ?LOG_INFO("Retrying ~s request to ~s in ~p seconds due to error ~p",
+    ?LOG_INFO("Retrying ~s request to ~s in ~p seconds due to error ~s",
         [Method, Url, Wait / 1000, error_cause(Error)]),
     ok = timer:sleep(Wait),
     send_req(HttpDb#httpdb{retries = Retries - 1, wait = Wait * 2}, Params, Cb).
@@ -188,27 +198,29 @@ do_report_error(Url, Method, {code, Code}) ->
         "HTTP error code is ~p", [Method, Url, Code]);
 
 do_report_error(FullUrl, Method, Error) ->
-    ?LOG_ERROR("Replicator, request ~s to ~p failed due to error ~p",
+    ?LOG_ERROR("Replicator, request ~s to ~p failed due to error ~s",
         [Method, FullUrl, error_cause(Error)]).
 
 
+error_cause({throw, {error, Cause}}) ->
+    lists:flatten(io_lib:format("~p", [Cause]));
 error_cause({error, Cause}) ->
-    Cause;
+    lists:flatten(io_lib:format("~p", [Cause]));
 error_cause(Cause) ->
-    Cause.
+    lists:flatten(io_lib:format("~p", [Cause])).
 
 
 stream_data_self(HttpDb, Params, Worker, ReqId, Cb) ->
     ibrowse:stream_next(ReqId),
     receive
     {ibrowse_async_response, ReqId, {error, _} = Error} ->
-        maybe_retry(Error, Worker, HttpDb, Params, Cb);
+        throw(Error);
+    {ibrowse_async_response, ReqId, <<>>} ->
+        stream_data_self(HttpDb, Params, Worker, ReqId, Cb);
     {ibrowse_async_response, ReqId, Data} ->
         {Data, fun() -> stream_data_self(HttpDb, Params, Worker, ReqId, Cb) end};
     {ibrowse_async_response_end, ReqId} ->
-        {<<>>, fun() ->
-            report_error(Worker, HttpDb, Params, {error, more_data_expected})
-        end}
+        {<<>>, fun() -> throw({error, more_data_expected}) end}
     end.
 
 
