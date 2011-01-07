@@ -121,8 +121,8 @@ process_response({ok, Code, Headers, Body}, Worker, HttpDb, Params, Callback) ->
         end,
         try
             Callback(Ok, Headers, EJson)
-        catch Tag:Err ->
-            maybe_retry({Tag, Err}, Worker, HttpDb, Params, Callback)
+        catch throw:{maybe_retry_req, Err} ->
+            maybe_retry(Err, Worker, HttpDb, Params, Callback)
         end;
     R when R =:= 301 ; R =:= 302 ; R =:= 303 ->
         do_redirect(Worker, R, Headers, HttpDb, Params, Callback);
@@ -148,8 +148,8 @@ process_stream_response(ReqId, Worker, HttpDb, Params, Callback) ->
                 receive {ibrowse_async_response_end, ReqId} -> ok
                 after 0 -> ok end,
                 Ret
-            catch Tag:Err ->
-                maybe_retry({Tag, Err}, Worker, HttpDb, Params, Callback)
+            catch throw:{maybe_retry_req, Err} ->
+                maybe_retry(Err, Worker, HttpDb, Params, Callback)
             end;
         R when R =:= 301 ; R =:= 302 ; R =:= 303 ->
             do_redirect(Worker, R, Headers, HttpDb, Params, Callback);
@@ -213,8 +213,8 @@ error_cause(Cause) ->
 stream_data_self(HttpDb, Params, Worker, ReqId, Cb) ->
     ibrowse:stream_next(ReqId),
     receive
-    {ibrowse_async_response, ReqId, {error, _} = Error} ->
-        throw(Error);
+    {ibrowse_async_response, ReqId, {error, Error}} ->
+        throw({maybe_retry_req, Error});
     {ibrowse_async_response, ReqId, <<>>} ->
         stream_data_self(HttpDb, Params, Worker, ReqId, Cb);
     {ibrowse_async_response, ReqId, Data} ->
