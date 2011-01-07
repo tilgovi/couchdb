@@ -138,13 +138,14 @@ process_stream_response(ReqId, Worker, HttpDb, Params, Callback) ->
             StreamDataFun = fun() ->
                 stream_data_self(HttpDb, Params, Worker, ReqId, Callback)
             end,
+            ibrowse:stream_next(ReqId),
             try
                 Ret = Callback(Ok, Headers, StreamDataFun),
                 stop_worker(Worker, HttpDb),
-                receive {ibrowse_async_response_end, ReqId} -> ok
-                after 0 -> ok end,
+                clean_mailbox_req(ReqId),
                 Ret
             catch throw:{maybe_retry_req, Err} ->
+                clean_mailbox_req(ReqId),
                 maybe_retry(Err, Worker, HttpDb, Params, Callback)
             end;
         R when R =:= 301 ; R =:= 302 ; R =:= 303 ->
@@ -154,6 +155,17 @@ process_stream_response(ReqId, Worker, HttpDb, Params, Callback) ->
         end;
     {ibrowse_async_response, ReqId, {error, _} = Error} ->
         maybe_retry(Error, Worker, HttpDb, Params, Callback)
+    end.
+
+
+clean_mailbox_req(ReqId) ->
+    receive
+    {ibrowse_async_response, ReqId, _} ->
+        clean_mailbox_req(ReqId);
+    {ibrowse_async_response_end, ReqId} ->
+        clean_mailbox_req(ReqId)
+    after 0 ->
+        ok
     end.
 
 
@@ -207,13 +219,14 @@ error_cause(Cause) ->
 
 
 stream_data_self(HttpDb, Params, Worker, ReqId, Cb) ->
-    ibrowse:stream_next(ReqId),
     receive
     {ibrowse_async_response, ReqId, {error, Error}} ->
         throw({maybe_retry_req, Error});
     {ibrowse_async_response, ReqId, <<>>} ->
+        ibrowse:stream_next(ReqId),
         stream_data_self(HttpDb, Params, Worker, ReqId, Cb);
     {ibrowse_async_response, ReqId, Data} ->
+        ibrowse:stream_next(ReqId),
         {Data, fun() -> stream_data_self(HttpDb, Params, Worker, ReqId, Cb) end};
     {ibrowse_async_response_end, ReqId} ->
         {<<>>, fun() -> throw({maybe_retry_req, more_data_expected}) end}

@@ -166,7 +166,7 @@ open_doc_revs(#httpdb{} = HttpDb, Id, Revs, Options, Fun, Acc) ->
                         {"X-CouchDB-Send-Encoded-Atts", "true"}
                     ]}],
                 fun(200, Headers, StreamDataFun) ->
-                    Self ! started,
+                    remote_open_doc_revs_streamer_start(Self),
                     {<<"--">>, _, _} = couch_httpd:parse_multipart_request(
                         get_value("Content-Type", Headers),
                         StreamDataFun,
@@ -442,6 +442,10 @@ atts_since_arg(UrlLen, [PA | Rest], Acc) ->
     end.
 
 
+% TODO: A less verbose, more elegant and automatic restart strategy for
+%       the exported open_doc_revs/6 function. The restart should be
+%       transparent to the caller like any other Couch API function exported
+%       by this module.
 receive_docs_loop(Streamer, Fun, Acc) ->
     try
         receive_docs(Streamer, Fun, Acc)
@@ -454,7 +458,7 @@ receive_docs(Streamer, UserFun, UserAcc) ->
     Streamer ! {get_headers, self()},
     receive
     started ->
-        throw(restart);
+        restart_remote_open_doc_revs();
     {headers, Headers} ->
         case get_value("content-type", Headers) of
         {"multipart/related", _} = ContentType ->
@@ -480,25 +484,44 @@ receive_docs(Streamer, UserFun, UserAcc) ->
         {ok, UserAcc}
     end.
 
+
+restart_remote_open_doc_revs() ->
+    receive
+    {body_bytes, _} ->
+        restart_remote_open_doc_revs();
+    body_done ->
+        restart_remote_open_doc_revs();
+    done ->
+        restart_remote_open_doc_revs();
+    {headers, _} ->
+        restart_remote_open_doc_revs();
+    started ->
+        restart_remote_open_doc_revs()
+    after 0 ->
+        throw(restart)
+    end.
+
+
+remote_open_doc_revs_streamer_start(Parent) ->
+    receive
+    {get_headers, _} ->
+        remote_open_doc_revs_streamer_start(Parent);
+    {next_bytes, _} ->
+        remote_open_doc_revs_streamer_start(Parent)
+    after 0 ->
+        Parent ! started
+    end.
+
+
 receive_all(Streamer, Acc) ->
     Streamer ! {next_bytes, self()},
     receive
     started ->
-        throw(restart);
+        restart_remote_open_doc_revs();
     {body_bytes, Bytes} ->
         receive_all(Streamer, [Bytes | Acc]);
     body_done ->
         lists:reverse(Acc)
-    end.
-
-
-receive_doc_data(Streamer) ->
-    Streamer ! {next_bytes, self()},
-    receive
-    {body_bytes, Bytes} ->
-        {Bytes, fun() -> receive_doc_data(Streamer) end};
-    body_done ->
-        {<<>>, fun() -> receive_doc_data(Streamer) end}
     end.
 
 
@@ -525,8 +548,15 @@ mp_parse_mixed(body_end) ->
     fun mp_parse_mixed/1.
 
 
-% It's almost the same version as in the couch_doc module.
-% TODO: improve this.
+receive_doc_data(Streamer) ->
+    Streamer ! {next_bytes, self()},
+    receive
+    {body_bytes, Bytes} ->
+        {Bytes, fun() -> receive_doc_data(Streamer) end};
+    body_done ->
+        {<<>>, fun() -> receive_doc_data(Streamer) end}
+    end.
+
 doc_from_multi_part_stream(ContentType, DataFun) ->
     Self = self(),
     Parser = spawn_link(fun() ->
@@ -540,7 +570,7 @@ doc_from_multi_part_stream(ContentType, DataFun) ->
     started ->
         unlink(Parser),
         exit(Parser, kill),
-        throw(restart);
+        restart_remote_open_doc_revs();
     {doc_bytes, DocBytes} ->
         Doc = couch_doc:from_json_obj(?JSON_DECODE(DocBytes)),
         ReadAttachmentDataFun = fun() ->
@@ -549,7 +579,7 @@ doc_from_multi_part_stream(ContentType, DataFun) ->
             started ->
                 unlink(Parser),
                 exit(Parser, kill),
-                throw(restart);
+                restart_remote_open_doc_revs();
             {bytes, Bytes} ->
                 Bytes
             end
