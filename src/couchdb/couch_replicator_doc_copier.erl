@@ -24,7 +24,7 @@
 -include("couch_api_wrap.hrl").
 
 -define(DOC_BUFFER_BYTE_SIZE, 1024 * 1024). % for remote targets
--define(DOC_BUFFER_LEN, 100).               % for local targets, # of documents
+-define(DOC_BUFFER_LEN, 10).                % for local targets, # of documents
 -define(MAX_BULK_ATT_SIZE, 64 * 1024).
 -define(MAX_BULK_ATTS_PER_DOC, 8).
 
@@ -125,8 +125,9 @@ handle_call({fetch_doc, {_Id, Revs, _PAs, Seq} = Params}, {Pid, _} = From,
         {noreply, NewState}
     end;
 
-handle_call({batch_doc, Doc}, _From, State) ->
-    {reply, ok, maybe_flush_docs(Doc, State)};
+handle_call({batch_doc, Doc}, From, State) ->
+    gen_server:reply(From, ok),
+    {noreply, maybe_flush_docs(Doc, State)};
 
 handle_call({doc_flushed, true}, _From, #state{stats = Stats} = State) ->
     NewStats = Stats#rep_stats{
