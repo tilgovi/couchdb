@@ -254,16 +254,18 @@ update_docs(#httpdb{} = HttpDb, DocList, Options, UpdateType) ->
             {ok, <<"]}">>, eof};
         ([{prefix, Prefix} | Rest]) ->
             {ok, Prefix, Rest};
-        ([Doc]) when is_binary(Doc) ->
-            {ok, Doc, []};
-        ([Doc | RestDocs]) when is_binary(Doc) ->
-            {ok, [Doc, ","], RestDocs};
         ([Doc]) when is_record(Doc, doc) ->
             DocJson = couch_doc:to_json_obj(Doc, [revs, attachments]),
             {ok, ?JSON_ENCODE(DocJson), []};
         ([Doc | RestDocs]) when is_record(Doc, doc) ->
             DocJson = couch_doc:to_json_obj(Doc, [revs, attachments]),
-            {ok, [?JSON_ENCODE(DocJson), ","], RestDocs}
+            {ok, [?JSON_ENCODE(DocJson), ","], RestDocs};
+        ([Doc]) ->
+            % IO list
+            {ok, Doc, []};
+        ([Doc | RestDocs]) ->
+            % IO list
+            {ok, [Doc, ","], RestDocs}
     end,
     send_req(
         HttpDb,

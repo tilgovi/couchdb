@@ -403,9 +403,8 @@ maybe_flush_docs(#httpdb{} = Target,
             {Batch, 0, 1}
         end;
     false ->
-        JsonDoc = iolist_to_binary(
-            ?JSON_ENCODE(couch_doc:to_json_obj(Doc, [revs, attachments]))),
-        case SizeAcc + byte_size(JsonDoc) of
+        JsonDoc = ?JSON_ENCODE(couch_doc:to_json_obj(Doc, [revs, attachments])),
+        case SizeAcc + iolist_size(JsonDoc) of
         SizeAcc2 when SizeAcc2 > ?DOC_BUFFER_BYTE_SIZE ->
             {Written, Failed} = flush_docs(Target, [JsonDoc | DocAcc]),
             {#batch{}, Written, Failed};
