@@ -119,11 +119,7 @@ process_response({ok, Code, Headers, Body}, Worker, HttpDb, Params, Callback) ->
         Json ->
             ?JSON_DECODE(Json)
         end,
-        try
-            Callback(Ok, Headers, EJson)
-        catch throw:{maybe_retry_req, Err} ->
-            maybe_retry(Err, Worker, HttpDb, Params, Callback)
-        end;
+        Callback(Ok, Headers, EJson);
     R when R =:= 301 ; R =:= 302 ; R =:= 303 ->
         do_redirect(Worker, R, Headers, HttpDb, Params, Callback);
     Error ->
