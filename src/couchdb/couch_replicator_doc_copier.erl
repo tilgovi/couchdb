@@ -183,12 +183,8 @@ handle_info({'EXIT', Pid, normal}, #state{loop = Pid} = State) ->
     } = State,
     {stop, normal, State};
 
-handle_info({'EXIT', Pid, normal},
-    #state{writer = Pid, stats = Stats} = State) ->
-    NewState = after_full_flush(State),
-    ?LOG_DEBUG("Replication copy process, read ~p documents, wrote ~p documents",
-        [Stats#rep_stats.docs_read, Stats#rep_stats.docs_written]),
-    {noreply, NewState};
+handle_info({'EXIT', Pid, normal}, #state{writer = Pid} = State) ->
+    {noreply, after_full_flush(State)};
 
 handle_info({'EXIT', Pid, normal}, #state{writer = nil} = State) ->
     #state{
@@ -251,7 +247,8 @@ queue_fetch_loop(Source, Target, Parent, MissingRevsQueue) ->
                 IdRevs, Source2, Target2, #batch{}, #rep_stats{}, ?LOWEST_SEQ),
             close_db(Source2),
             close_db(Target2),
-            ok = gen_server:cast(Parent, {report_seq_done, HighSeqDone, Stats});
+            ok = gen_server:cast(Parent, {report_seq_done, HighSeqDone, Stats}),
+            ?LOG_DEBUG("Worker reported completion of seq ~p", [HighSeqDone]);
         #httpdb{} ->
             remote_process_batch(IdRevs, Parent)
         end,
@@ -259,8 +256,17 @@ queue_fetch_loop(Source, Target, Parent, MissingRevsQueue) ->
     end.
 
 
-local_process_batch([], _Source, Target, #batch{docs = Docs},
+local_process_batch([], _Src, _Tgt, #batch{docs = []}, Stats, HighestSeqDone) ->
+    {Stats, HighestSeqDone};
+
+local_process_batch([], _Source, Target, #batch{docs = Docs, size = Size},
     Stats, HighestSeqDone) ->
+    case Target of
+    #httpdb{} ->
+        ?LOG_DEBUG("Worker flushing doc batch of size ~p bytes", [Size]);
+    #db{} ->
+        ?LOG_DEBUG("Worker flushing doc batch of ~p docs", [Size])
+    end,
     {Written, WriteFailures} = flush_docs(Target, Docs),
     Stats2 = Stats#rep_stats{
         docs_written = Stats#rep_stats.docs_written + Written,
@@ -351,7 +357,15 @@ remote_doc_handler(_, Acc) ->
     Acc.
 
 
-spawn_writer(Target, #batch{docs = DocList}) ->
+spawn_writer(Target, #batch{docs = DocList, size = Size}) ->
+    case {Target, Size > 0} of
+    {#httpdb{}, true} ->
+        ?LOG_DEBUG("Worker flushing doc batch of size ~p bytes", [Size]);
+    {#db{}, true} ->
+        ?LOG_DEBUG("Worker flushing doc batch of ~p docs", [Size]);
+    _ ->
+        ok
+    end,
     Parent = self(),
     spawn_link(
         fun() ->
@@ -366,6 +380,7 @@ spawn_writer(Target, #batch{docs = DocList}) ->
 after_full_flush(#state{cp = Cp, stats = Stats, flush_waiter = Waiter,
         highest_seq_seen = HighSeqDone} = State) ->
     ok = gen_server:cast(Cp, {report_seq_done, HighSeqDone, Stats}),
+    ?LOG_DEBUG("Worker reported completion of seq ~p", [HighSeqDone]),
     gen_server:reply(Waiter, ok),
     State#state{
         stats = #rep_stats{},
@@ -396,6 +411,7 @@ maybe_flush_docs(#httpdb{} = Target,
         lists:any(
             fun(A) -> A#att.disk_len > ?MAX_BULK_ATT_SIZE end, Atts) of
     true ->
+        ?LOG_DEBUG("Worker flushing doc with attachments", []),
         case flush_doc(Target, Doc) of
         ok ->
             {Batch, 1, 0};
@@ -406,6 +422,7 @@ maybe_flush_docs(#httpdb{} = Target,
         JsonDoc = ?JSON_ENCODE(couch_doc:to_json_obj(Doc, [revs, attachments])),
         case SizeAcc + iolist_size(JsonDoc) of
         SizeAcc2 when SizeAcc2 > ?DOC_BUFFER_BYTE_SIZE ->
+            ?LOG_DEBUG("Worker flushing doc batch of size ~p bytes", [SizeAcc2]),
             {Written, Failed} = flush_docs(Target, [JsonDoc | DocAcc]),
             {#batch{}, Written, Failed};
         SizeAcc2 ->
@@ -417,6 +434,7 @@ maybe_flush_docs(#db{} = Target, #batch{docs = DocAcc, size = SizeAcc},
     #doc{atts = []} = Doc) ->
     case SizeAcc + 1 of
     SizeAcc2 when SizeAcc2 >= ?DOC_BUFFER_LEN ->
+        ?LOG_DEBUG("Worker flushing doc batch of ~p docs", [SizeAcc2]),
         {Written, Failed} = flush_docs(Target, [Doc | DocAcc]),
         {#batch{}, Written, Failed};
     SizeAcc2 ->
@@ -424,6 +442,7 @@ maybe_flush_docs(#db{} = Target, #batch{docs = DocAcc, size = SizeAcc},
     end;
 
 maybe_flush_docs(#db{} = Target, Batch, Doc) ->
+    ?LOG_DEBUG("Worker flushing doc with attachments", []),
     case flush_doc(Target, Doc) of
     ok ->
         {Batch, 1, 0};

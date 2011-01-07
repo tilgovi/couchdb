@@ -37,6 +37,7 @@ missing_revs_finder_loop(Cp, Target, ChangesQueue, RevsQueue, BatchSize) ->
     {ok, DocInfos} ->
         #doc_info{high_seq = ReportSeq} = lists:last(DocInfos),
         ok = gen_server:cast(Cp, {report_seq, ReportSeq}),
+        ?LOG_DEBUG("Missing revs finder defined report seq ~p", [ReportSeq]),
         IdRevs = [{Id, [Rev || #rev_info{rev = Rev} <- RevsInfo]} ||
                     #doc_info{id = Id, revs = RevsInfo} <- DocInfos],
         Target2 = open_db(Target),
@@ -68,6 +69,8 @@ queue_missing_revs(Missing, DocInfos, Queue) ->
             end
         end,
         AllDict, non_missing(IdRevsSeqDict, Missing)),
+    ?LOG_DEBUG("Missing revs finder adding batch of ~p IdRevs to work queue",
+        [dict:size(AllDict2)]),
     ok = couch_work_queue:queue(Queue, dict:to_list(AllDict2)).
 
 
