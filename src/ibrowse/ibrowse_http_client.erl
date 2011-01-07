@@ -236,10 +236,17 @@ handle_info({req_timedout, From}, State) ->
     end;
 
 handle_info(timeout, State) ->
-    do_trace("Inactivity timeout triggered. Shutting down connection~n", []),
-    shutting_down(State),
-    do_error_reply(State, req_timedout),
-    {stop, normal, State};
+    receive
+        {tcp, _Sock, Data} ->
+            handle_sock_data(Data, State);
+        {ssl, _Sock, Data} ->
+            handle_sock_data(Data, State)
+    after 0 ->
+        do_trace("Inactivity timeout triggered. Shutting down connection~n", []),
+        shutting_down(State),
+        do_error_reply(State, req_timedout),
+        {stop, normal, State}
+    end;
 
 handle_info({trace, Bool}, State) ->
     put(my_trace_flag, Bool),
@@ -287,10 +294,14 @@ handle_sock_data(Data, #state{status = get_header}=State) ->
         {error, _Reason} ->
             shutting_down(State),
             {stop, normal, State};
-        State_1 ->
-            active_once(State_1),
-            State_2 = set_inac_timer(State_1),
-            {noreply, State_2}
+        #state{socket = Socket, status = Status, cur_req = CurReq} = State_1 ->
+            case {Status, CurReq} of
+                {get_header, #request{caller_controls_socket = true}} ->
+                    do_setopts(Socket, [{active, once}], State_1);
+                _ ->
+                    active_once(State_1)
+            end,
+            {noreply, set_inac_timer(State_1)}
     end;
 
 handle_sock_data(Data, #state{status           = get_body,
@@ -543,7 +554,7 @@ do_send_body1(Source, Resp, State, TE) ->
 maybe_chunked_encode(Data, false) ->
     Data;
 maybe_chunked_encode(Data, true) ->
-    [?dec2hex(size(to_binary(Data))), "\r\n", Data, "\r\n"].
+    [?dec2hex(iolist_size(Data)), "\r\n", Data, "\r\n"].
 
 do_close(#state{socket = undefined})            ->  ok;
 do_close(#state{socket = Sock,
@@ -683,6 +694,7 @@ send_req_1(From,
            Headers, Method, Body, Options, Timeout,
            #state{status    = Status,
                   socket    = Socket} = State) ->
+    cancel_timer(State#state.inactivity_timer_ref, {eat_message, timeout}),
     ReqId = make_req_id(),
     Resp_format = get_value(response_format, Options, list),
     Caller_socket_options = get_value(socket_options, Options, []),
