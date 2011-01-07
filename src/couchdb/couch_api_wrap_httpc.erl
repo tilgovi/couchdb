@@ -216,7 +216,7 @@ stream_data_self(HttpDb, Params, Worker, ReqId, Cb) ->
     {ibrowse_async_response, ReqId, Data} ->
         {Data, fun() -> stream_data_self(HttpDb, Params, Worker, ReqId, Cb) end};
     {ibrowse_async_response_end, ReqId} ->
-        {<<>>, fun() -> throw({error, more_data_expected}) end}
+        {<<>>, fun() -> throw({maybe_retry_req, more_data_expected}) end}
     end.
 
 
