@@ -23,7 +23,7 @@
 -include("couch_db.hrl").
 -include("couch_api_wrap.hrl").
 
--define(DOC_BUFFER_BYTE_SIZE, 1024 * 1024). % for remote targets
+-define(DOC_BUFFER_BYTE_SIZE, 384 * 1024).  % for remote targets
 -define(DOC_BUFFER_LEN, 10).                % for local targets, # of documents
 -define(MAX_BULK_ATT_SIZE, 64 * 1024).
 -define(MAX_BULK_ATTS_PER_DOC, 8).
