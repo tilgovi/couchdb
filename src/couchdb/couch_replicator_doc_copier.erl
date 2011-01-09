@@ -265,7 +265,8 @@ local_process_batch([], _Source, Target, #batch{docs = Docs, size = Size},
     Stats, HighestSeqDone) ->
     case Target of
     #httpdb{} ->
-        ?LOG_DEBUG("Worker flushing doc batch of size ~p bytes", [Size]);
+        ?LOG_DEBUG("Worker flushing doc batch of size ~p bytes (~p docs)",
+            [Size, length(Docs)]);
     #db{} ->
         ?LOG_DEBUG("Worker flushing doc batch of ~p docs", [Size])
     end,
@@ -362,7 +363,8 @@ remote_doc_handler(_, Acc) ->
 spawn_writer(Target, #batch{docs = DocList, size = Size}) ->
     case {Target, Size > 0} of
     {#httpdb{}, true} ->
-        ?LOG_DEBUG("Worker flushing doc batch of size ~p bytes", [Size]);
+        ?LOG_DEBUG("Worker flushing doc batch of size ~p bytes (~p docs)",
+            [Size, length(DocList)]);
     {#db{}, true} ->
         ?LOG_DEBUG("Worker flushing doc batch of ~p docs", [Size]);
     _ ->
@@ -424,7 +426,8 @@ maybe_flush_docs(#httpdb{} = Target,
         JsonDoc = ?JSON_ENCODE(couch_doc:to_json_obj(Doc, [revs, attachments])),
         case SizeAcc + iolist_size(JsonDoc) of
         SizeAcc2 when SizeAcc2 > ?DOC_BUFFER_BYTE_SIZE ->
-            ?LOG_DEBUG("Worker flushing doc batch of size ~p bytes", [SizeAcc2]),
+            ?LOG_DEBUG("Worker flushing doc batch of size ~p bytes (~p docs)",
+                [SizeAcc2, length(DocAcc) + 1]),
             {Written, Failed} = flush_docs(Target, [JsonDoc | DocAcc]),
             {#batch{}, Written, Failed};
         SizeAcc2 ->
