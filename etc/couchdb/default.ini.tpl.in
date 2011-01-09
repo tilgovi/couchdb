@@ -156,7 +156,7 @@ connection_timeout = 30000
 ;       {recbuf, integer()}
 ;       {priority, integer()}
 ; See the `inet` Erlang module's man page for the full list of options
-socket_options = [{reuseaddr, true}, {keepalive, true}]
+socket_options = [{reuseaddr, true}, {keepalive, true}, {nodelay, false}]
 ; set to true to validate peer certificates
 verify_ssl_certificates = false
 ; file containing a list of peer trusted certificates (PEM format)
