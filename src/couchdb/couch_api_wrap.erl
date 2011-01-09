@@ -221,8 +221,9 @@ update_doc(#httpdb{} = HttpDb, #doc{id = DocId} = Doc, Options, Type) ->
     Body = {fun stream_doc/1, {JsonBytes, Doc#doc.atts, Boundary, Len}},
     send_req(
         HttpDb,
-        [{method, put}, {path, encode_doc_id(DocId)}, {direct, true},
-            {qs, QArgs}, {headers, Headers}, {body, Body}],
+        [{method, put}, {path, encode_doc_id(DocId)},
+           {direct, Type =:= interactive_edit}, {qs, QArgs},
+           {headers, Headers}, {body, Body}],
         fun(Code, _, {Props}) when Code =:= 200 orelse Code =:= 201 ->
                 {ok, couch_doc:parse_rev(get_value(<<"rev">>, Props))};
             (_, _, {Props}) ->
@@ -269,7 +270,7 @@ update_docs(#httpdb{} = HttpDb, DocList, Options, UpdateType) ->
     end,
     send_req(
         HttpDb,
-        [{method, post}, {path, "_bulk_docs"}, {direct, true},
+        [{method, post}, {path, "_bulk_docs"},
             {body, {BodyFun, [Prefix1 | DocList]}},
             {ibrowse_options, [{transfer_encoding, chunked}]},
             {headers, [
