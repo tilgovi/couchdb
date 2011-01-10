@@ -527,7 +527,7 @@ do_checkpoint(State) ->
         src_starttime = SrcInstanceStartTime,
         tgt_starttime = TgtInstanceStartTime,
         stats = Stats,
-        rep_details = #rep{options = Options},
+        rep_details = #rep{options = Options, id = {BaseId, Ext}},
         session_id = SessionId
     } = State,
     case commit_to_both(Source, Target) of
@@ -590,9 +590,11 @@ do_checkpoint(State) ->
             State
         end;
     _Else ->
-        ?LOG_INFO("rebooting ~p -> ~p from last known replication checkpoint",
-            [SourceName, TargetName]),
-        throw(restart)
+        ?LOG_INFO("rebooting replication `~s` (`~s` -> `~s`) from last known "
+            "replication checkpoint", [BaseId ++ Ext, SourceName, TargetName]),
+        RepInfo = io_lib:format("replication `~s` (`~s` -> `~s`)",
+            [BaseId ++ Ext, SourceName, TargetName]),
+        exit({checkpoint_commit_failure, lists:flatten(RepInfo)})
     end.
 
 
