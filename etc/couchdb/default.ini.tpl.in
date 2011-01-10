@@ -138,7 +138,7 @@ compressible_types = text/*, application/javascript, application/json,  applicat
 [replicator]
 db = _replicator
 ; More worker processes can give higher network throughput but can also
-; imply more disk IO.
+; imply more disk and network IO.
 worker_processes = 4
 ; With lower batch sizes checkpoints are done more frequently.
 worker_batch_size = 1000
@@ -155,7 +155,7 @@ connection_timeout = 30000
 ;       {sndbuf, integer()}
 ;       {recbuf, integer()}
 ;       {priority, integer()}
-; See the `inet` Erlang module's man page for the full list of options
+; See the `inet` Erlang module's man page for the full list of options.
 socket_options = [{reuseaddr, true}, {keepalive, true}, {nodelay, false}]
 ; set to true to validate peer certificates
 verify_ssl_certificates = false
