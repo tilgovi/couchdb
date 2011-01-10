@@ -30,6 +30,8 @@ AC_PROG_CC
 AC_PROG_LIBTOOL
 AC_PROG_LN_S
 
+PKG_PROG_PKG_CONFIG
+
 AC_MSG_CHECKING([for pthread_create in -lpthread])
 
 original_LIBS="$LIBS"
@@ -56,40 +58,38 @@ AC_ARG_WITH([erlang], [AC_HELP_STRING([--with-erlang=PATH],
     ERLANG_FLAGS="$ERLANG_FLAGS -I/opt/local/lib/erlang/usr/include"
 ])
 
-AC_ARG_WITH([js-include], [AC_HELP_STRING([--with-js-include=PATH],
-    [set PATH to the SpiderMonkey include directory])], [
-    JS_INCLUDE="$withval"
-    JS_FLAGS="-I$JS_INCLUDE"
-], [
-    JS_FLAGS="-I/usr/include"
-    JS_FLAGS="$JS_FLAGS -I/usr/include/js"
-    JS_FLAGS="$JS_FLAGS -I/usr/include/mozjs"
-    JS_FLAGS="$JS_FLAGS -I/usr/local/include"
-    JS_FLAGS="$JS_FLAGS -I/opt/local/include"
-    JS_FLAGS="$JS_FLAGS -I/usr/local/include/js"
-    JS_FLAGS="$JS_FLAGS -I/opt/local/include/js"
+PKG_CHECK_MODULES([JS], [mozilla-js >= 1.7], [], [
+    AC_ARG_WITH([js-include], [AC_HELP_STRING([--with-js-include=PATH],
+        [set PATH to the SpiderMonkey include directory])], [
+        JS_INCLUDE="$withval"
+        JS_CFLAGS="-I$withval $JS_CFLAGS"
+    ], [
+        JS_CFLAGS="$JS_CFLAGS -I/usr/include"
+        JS_CFLAGS="$JS_CFLAGS -I/usr/include/js"
+        JS_CFLAGS="$JS_CFLAGS -I/usr/include/mozjs"
+        JS_CFLAGS="$JS_CFLAGS -I/usr/local/include"
+        JS_CFLAGS="$JS_CFLAGS -I/opt/local/include"
+        JS_CFLAGS="$JS_CFLAGS -I/usr/local/include/js"
+        JS_CFLAGS="$JS_CFLAGS -I/opt/local/include/js"
+    ])
+    AC_ARG_WITH([js-lib], [AC_HELP_STRING([--with-js-lib=PATH],
+        [set PATH to the SpiderMonkey library directory])], [
+        JS_LIB_DIR="$withval"
+        JS_LIBS="-L$withval $JS_LIBS"
+    ], [])
+    AC_SUBST(JS_LIB_DIR)
 ])
-
-AC_ARG_WITH([js-lib], [AC_HELP_STRING([--with-js-lib=PATH],
-    [set PATH to the SpiderMonkey library directory])],
-    [
-    JS_LIB_DIR=$withval
-    JS_LIB_FLAGS="-L$withval"
-], [
-    JS_LIB_DIR=
-])
-AC_SUBST(JS_LIB_DIR)
 
 AC_ARG_VAR([ERLC_FLAGS], [general flags to prepend to ERLC_FLAGS])
 AC_ARG_VAR([FLAGS], [general flags to prepend to LDFLAGS and CPPFLAGS])
 
-LIB_FLAGS="$JS_LIB_FLAGS -L/usr/local/lib -L/opt/local/lib"
+LIB_FLAGS="$JS_LIBS -L/usr/local/lib -L/opt/local/lib"
 LIBS="$LIB_FLAGS $LIBS"
 
 case "$(uname -s)" in
   CYGWIN*)
-    FLAGS="$LIB_FLAGS $ERLANG_FLAGS $JS_FLAGS -DXP_WIN $FLAGS"
-    CPPFLAGS="$FLAGS $CPPFLAGS"
+    FLAGS="$ERLANG_FLAGS $FLAGS"
+    CPPFLAGS="$FLAGS $CPPFLAGS -DXP_WIN $JS_CFLAGS"
     LDFLAGS="$FLAGS $LDFLAGS"
     IS_WINDOWS="TRUE"
     # The erlang cc.sh/ld.sh scripts will convert a -O option
@@ -98,9 +98,9 @@ case "$(uname -s)" in
     LTCFLAGS="$CFLAGS"
     ;;
   *)
+    FLAGS="$ERLANG_FLAGS $FLAGS"
     # XP_UNIX required for jsapi.h and has been tested to work on Linux and Darwin.
-    FLAGS="$LIB_FLAGS $ERLANG_FLAGS $JS_FLAGS -DXP_UNIX $FLAGS"
-    CPPFLAGS="$FLAGS $CPPFLAGS"
+    CPPFLAGS="$FLAGS $CPPFLAGS -DXP_UNIX $JS_CFLAGS"
     # manually linking libm is requred for FreeBSD 7.0
     LDFLAGS="$FLAGS -lm $LDFLAGS"
     ;;
@@ -161,7 +161,7 @@ if test x${IS_WINDOWS} = xTRUE; then
     fi
 fi
 
-JSLIB=-l$JS_LIB_BASE
+JS_LIBS="-l$JS_LIB_BASE $JS_LIBS"
 
 AC_CHECK_HEADER([jsapi.h], [], [
     AC_CHECK_HEADER([js/jsapi.h],
