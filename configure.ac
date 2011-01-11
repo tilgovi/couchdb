@@ -107,7 +107,7 @@ case "$(uname -s)" in
     # manually linking libm is requred for FreeBSD 7.0
     LDFLAGS="$FLAGS -lm $LDFLAGS"
     # XP_UNIX required for jsapi.h and has been tested to work on Linux and Darwin.
-    JS_CFLAGS="$DXP_UNIX $JS_CFLAGS"
+    JS_CFLAGS="-DXP_UNIX $JS_CFLAGS"
     ;;
 esac
 
