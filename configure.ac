@@ -58,32 +58,37 @@ AC_ARG_WITH([erlang], [AC_HELP_STRING([--with-erlang=PATH],
     ERLANG_FLAGS="$ERLANG_FLAGS -I/opt/local/lib/erlang/usr/include"
 ])
 
-PKG_CHECK_MODULES([JS], [mozilla-js >= 1.7], [], [
-    AC_ARG_WITH([js-include], [AC_HELP_STRING([--with-js-include=PATH],
-        [set PATH to the SpiderMonkey include directory])], [
-        JS_INCLUDE="$withval"
-        JS_CFLAGS="-I$withval $JS_CFLAGS"
+PKG_CHECK_MODULES([JS], [mozilla-js >= 1.7], [
+        JS_LIB_DIR="$(${PKG_CONFIG} --variable=sdkdir mozilla-js)/lib"
     ], [
-        JS_CFLAGS="$JS_CFLAGS -I/usr/include"
-        JS_CFLAGS="$JS_CFLAGS -I/usr/include/js"
-        JS_CFLAGS="$JS_CFLAGS -I/usr/include/mozjs"
-        JS_CFLAGS="$JS_CFLAGS -I/usr/local/include"
-        JS_CFLAGS="$JS_CFLAGS -I/opt/local/include"
-        JS_CFLAGS="$JS_CFLAGS -I/usr/local/include/js"
-        JS_CFLAGS="$JS_CFLAGS -I/opt/local/include/js"
-    ])
-    AC_ARG_WITH([js-lib], [AC_HELP_STRING([--with-js-lib=PATH],
-        [set PATH to the SpiderMonkey library directory])], [
-        JS_LIB_DIR="$withval"
-        JS_LIBS="-L$withval $JS_LIBS"
-    ], [])
-    AC_SUBST(JS_LIB_DIR)
+        AC_ARG_WITH([js-include], [AC_HELP_STRING([--with-js-include=PATH],
+            [set PATH to the SpiderMonkey include directory])], [
+            JS_INCLUDE="$withval"
+            JS_CFLAGS="-I$withval $JS_CFLAGS"
+        ], [
+            JS_CFLAGS="$JS_CFLAGS -I/usr/include"
+            JS_CFLAGS="$JS_CFLAGS -I/usr/include/js"
+            JS_CFLAGS="$JS_CFLAGS -I/usr/include/mozjs"
+            JS_CFLAGS="$JS_CFLAGS -I/usr/local/include"
+            JS_CFLAGS="$JS_CFLAGS -I/opt/local/include"
+            JS_CFLAGS="$JS_CFLAGS -I/usr/local/include/js"
+            JS_CFLAGS="$JS_CFLAGS -I/opt/local/include/js"
+        ])
+        AC_ARG_WITH([js-lib], [AC_HELP_STRING([--with-js-lib=PATH],
+            [set PATH to the SpiderMonkey library directory])], [
+            JS_LIB_DIR="$withval"
+            JS_LIBS="-L$withval $JS_LIBS"
+        ], [
+            JS_LIB_DIR="${libdir}"
+        ])
 ])
+AC_SUBST(JS_LIB_DIR)
+AC_SUBST(JS_LIBS)
 
 AC_ARG_VAR([ERLC_FLAGS], [general flags to prepend to ERLC_FLAGS])
 AC_ARG_VAR([FLAGS], [general flags to prepend to LDFLAGS and CPPFLAGS])
 
-LIB_FLAGS="$JS_LIBS -L/usr/local/lib -L/opt/local/lib"
+LIB_FLAGS="-L/usr/local/lib -L/opt/local/lib"
 LIBS="$LIB_FLAGS $LIBS"
 
 case "$(uname -s)" in
@@ -108,6 +113,8 @@ esac
 
 AM_CONDITIONAL([WINDOWS], [test x$IS_WINDOWS = xTRUE])
 
+OLD_LIBS="$LIBS"
+LIBS="$JS_LIBS $LIBS"
 AC_CHECK_LIB([mozjs], [JS_NewContext], [JS_LIB_BASE=mozjs], [
     AC_CHECK_LIB([js], [JS_NewContext], [JS_LIB_BASE=js], [
         AC_CHECK_LIB([js3250], [JS_NewContext], [JS_LIB_BASE=js3250], [
@@ -115,7 +122,7 @@ AC_CHECK_LIB([mozjs], [JS_NewContext], [JS_LIB_BASE=mozjs], [
                 AC_MSG_ERROR([Could not find the js library.
 
 Is the Mozilla SpiderMonkey library installed?])])])])])
-
+LIBS="$OLD_LIBS"
 AC_SUBST(JS_LIB_BASE)
 
 if test x${IS_WINDOWS} = xTRUE; then
