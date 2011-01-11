@@ -83,31 +83,31 @@ PKG_CHECK_MODULES([JS], [mozilla-js >= 1.7], [
         ])
 ])
 AC_SUBST(JS_LIB_DIR)
-AC_SUBST(JS_LIBS)
 
 AC_ARG_VAR([ERLC_FLAGS], [general flags to prepend to ERLC_FLAGS])
 AC_ARG_VAR([FLAGS], [general flags to prepend to LDFLAGS and CPPFLAGS])
 
-LIB_FLAGS="-L/usr/local/lib -L/opt/local/lib"
-LIBS="$LIB_FLAGS $LIBS"
+LIBS="-L/usr/local/lib -L/opt/local/lib $LIBS"
 
 case "$(uname -s)" in
   CYGWIN*)
     FLAGS="$ERLANG_FLAGS $FLAGS"
-    CPPFLAGS="$FLAGS $CPPFLAGS -DXP_WIN $JS_CFLAGS"
+    CPPFLAGS="$FLAGS $CPPFLAGS"
     LDFLAGS="$FLAGS $LDFLAGS"
     IS_WINDOWS="TRUE"
     # The erlang cc.sh/ld.sh scripts will convert a -O option
     # into the same optimization flags erlang itself uses.
     CFLAGS="-O2"
     LTCFLAGS="$CFLAGS"
+    JS_CFLAGS="-DXP_WIN $JS_CFLAGS"
     ;;
   *)
     FLAGS="$ERLANG_FLAGS $FLAGS"
-    # XP_UNIX required for jsapi.h and has been tested to work on Linux and Darwin.
-    CPPFLAGS="$FLAGS $CPPFLAGS -DXP_UNIX $JS_CFLAGS"
+    CPPFLAGS="$FLAGS $CPPFLAGS"
     # manually linking libm is requred for FreeBSD 7.0
     LDFLAGS="$FLAGS -lm $LDFLAGS"
+    # XP_UNIX required for jsapi.h and has been tested to work on Linux and Darwin.
+    JS_CFLAGS="$DXP_UNIX $JS_CFLAGS"
     ;;
 esac
 
@@ -170,6 +170,8 @@ fi
 
 JS_LIBS="-l$JS_LIB_BASE $JS_LIBS"
 
+OLD_CPPFLAGS="$CPPFLAGS"
+CPPFLAGS="$JS_CFLAGS $CPPFLAGS"
 AC_CHECK_HEADER([jsapi.h], [], [
     AC_CHECK_HEADER([js/jsapi.h],
         [
@@ -180,8 +182,9 @@ AC_CHECK_HEADER([jsapi.h], [], [
 
 Are the Mozilla SpiderMonkey headers installed?])
         ])])
-
-AC_SUBST(JSLIB)
+CPPFLAGS="$OLD_CPPFLAGS"
+AC_SUBST(JS_CFLAGS)
+AC_SUBST(JS_LIBS)
 
 AC_LANG_PUSH(C)
 OLD_CFLAGS="$CFLAGS"
