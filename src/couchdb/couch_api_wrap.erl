@@ -161,10 +161,7 @@ open_doc_revs(#httpdb{} = HttpDb, Id, Revs, Options, Fun, Acc) ->
                 HttpDb,
                 [{path, Path}, {qs, QArgs},
                     {ibrowse_options, [{stream_to, {self(), once}}]},
-                    {headers, [
-                        {"Accept", "multipart/mixed"},
-                        {"X-CouchDB-Send-Encoded-Atts", "true"}
-                    ]}],
+                    {headers, [{"Accept", "multipart/mixed"}]}],
                 fun(200, Headers, StreamDataFun) ->
                     remote_open_doc_revs_streamer_start(Self),
                     {<<"--">>, _, _} = couch_httpd:parse_multipart_request(
