@@ -58,29 +58,33 @@ AC_ARG_WITH([erlang], [AC_HELP_STRING([--with-erlang=PATH],
     ERLANG_FLAGS="$ERLANG_FLAGS -I/opt/local/lib/erlang/usr/include"
 ])
 
+AC_ARG_WITH([js-include], [AC_HELP_STRING([--with-js-include=PATH],
+    [set PATH to the SpiderMonkey include directory])], [
+    JS_INCLUDE="$withval"
+    JS_CFLAGS="-I$withval $JS_CFLAGS"
+], [])
+
+AC_ARG_WITH([js-lib], [AC_HELP_STRING([--with-js-lib=PATH],
+    [set PATH to the SpiderMonkey library directory])], [
+    JS_LIB_DIR="$withval"
+    JS_LIBS="-L$withval $JS_LIBS"
+], [])
+
 PKG_CHECK_MODULES([JS], [mozilla-js >= 1.7], [
-        JS_LIB_DIR="$(${PKG_CONFIG} --variable=sdkdir mozilla-js)/lib"
+    JS_LIB_DIR="$(${PKG_CONFIG} --variable=sdkdir mozilla-js)/lib"
     ], [
-        AC_ARG_WITH([js-include], [AC_HELP_STRING([--with-js-include=PATH],
-            [set PATH to the SpiderMonkey include directory])], [
-            JS_INCLUDE="$withval"
-            JS_CFLAGS="-I$withval $JS_CFLAGS"
-        ], [
-            JS_CFLAGS="$JS_CFLAGS -I/usr/include"
-            JS_CFLAGS="$JS_CFLAGS -I/usr/include/js"
-            JS_CFLAGS="$JS_CFLAGS -I/usr/include/mozjs"
-            JS_CFLAGS="$JS_CFLAGS -I/usr/local/include"
-            JS_CFLAGS="$JS_CFLAGS -I/opt/local/include"
-            JS_CFLAGS="$JS_CFLAGS -I/usr/local/include/js"
-            JS_CFLAGS="$JS_CFLAGS -I/opt/local/include/js"
-        ])
-        AC_ARG_WITH([js-lib], [AC_HELP_STRING([--with-js-lib=PATH],
-            [set PATH to the SpiderMonkey library directory])], [
-            JS_LIB_DIR="$withval"
-            JS_LIBS="-L$withval $JS_LIBS"
-        ], [
-            JS_LIB_DIR="${libdir}"
-        ])
+    if test -n "$JS_LIB_DIR"; then
+        JS_LIB_DIR="${libdir}"
+    fi
+    if test -n "$JS_CFLAGS"; then
+        JS_CFLAGS="$JS_CFLAGS -I/usr/include"
+        JS_CFLAGS="$JS_CFLAGS -I/usr/include/js"
+        JS_CFLAGS="$JS_CFLAGS -I/usr/include/mozjs"
+        JS_CFLAGS="$JS_CFLAGS -I/usr/local/include"
+        JS_CFLAGS="$JS_CFLAGS -I/opt/local/include"
+        JS_CFLAGS="$JS_CFLAGS -I/usr/local/include/js"
+        JS_CFLAGS="$JS_CFLAGS -I/opt/local/include/js"
+    fi
 ])
 AC_SUBST(JS_LIB_DIR)
 
