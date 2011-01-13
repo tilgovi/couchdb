@@ -304,6 +304,13 @@ AC_ARG_ENABLE([native-mochijson], [AC_HELP_STRING([--enable-native-mochijson],
     native_mochijson_enabled=$enableval
 ], [])
 
+AC_ARG_WITH([pkgconfig-dir], [AC_HELP_STRING([--with-pkgconfig-dir=PATH],
+    [set PATH to the installation directory for pkg-config files])], [
+    pkgconfigdir="$withval"
+    ], [
+    pkgconfigdir="${libdir}/pkgconfig"
+])
+
 init_enabled=false
 launchd_enabled=false
 
@@ -354,6 +361,7 @@ AM_CONDITIONAL([INIT], [test x${init_enabled} = xtrue])
 AM_CONDITIONAL([LAUNCHD], [test x${launchd_enabled} = xtrue])
 AM_CONDITIONAL([HELP2MAN], [test x${help2man_enabled} = xtrue])
 AM_CONDITIONAL([USE_NATIVE_MOCHIJSON], [test x${native_mochijson_enabled} = xyes])
+AM_CONDITIONAL([PKG_CONFIG], [test -n "$PKG_CONFIG"])
 
 AC_SUBST([package_author_name], ["LOCAL_PACKAGE_AUTHOR_NAME"])
 AC_SUBST([package_author_address], ["LOCAL_PACKAGE_AUTHOR_ADDRESS"])
@@ -377,6 +385,8 @@ AC_SUBST([locallibdir], [${libdir}/${package_identifier}])
 AC_SUBST([localstatelibdir], [${localstatedir}/lib/${package_identifier}])
 AC_SUBST([localstatelogdir], [${localstatedir}/log/${package_identifier}])
 AC_SUBST([localstaterundir], [${localstatedir}/run/${package_identifier}])
+
+AC_SUBST([pkgconfigdir])
 
 # On Windows we install directly into our erlang distribution.
 if test x${IS_WINDOWS} = xTRUE; then
@@ -409,6 +419,9 @@ AC_CONFIG_FILES([etc/logrotate.d/couchdb.tpl])
 AC_CONFIG_FILES([etc/logrotate.d/Makefile])
 AC_CONFIG_FILES([etc/windows/Makefile])
 AC_CONFIG_FILES([etc/Makefile])
+AC_CONFIG_FILES([lib/Makefile])
+AC_CONFIG_FILES([lib/pkgconfig/couchdb.pc.tpl])
+AC_CONFIG_FILES([lib/pkgconfig/Makefile])
 AC_CONFIG_FILES([share/Makefile])
 AC_CONFIG_FILES([src/Makefile])
 AC_CONFIG_FILES([src/couchdb/couch.app.tpl])

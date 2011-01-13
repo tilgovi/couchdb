@@ -1,0 +1,9 @@
+prefix=%prefix%
+includedir=%couchincludedir%
+libdir=%localerlanglibdir%
+
+Name: CouchDB
+Description: The Apache CouchDB Server
+Version: @version@
+Cflags:-I${includedir}
+Libs: -pa ${libdir}

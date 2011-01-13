@@ -29,6 +29,9 @@ etc/init/Makefile
 etc/init/couchdb
 etc/launchd/Makefile
 etc/logrotate.d/Makefile
+lib/Makefile
+lib/pkgconfig/Makefile
+lib/pkgconfig/couchdb.pc
 libtool
 share/Makefile
 src/couchdb/.deps/*
