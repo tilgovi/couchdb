@@ -408,7 +408,7 @@ terminate(shutdown, State) ->
 
 terminate(Reason, #rep_state{rep_details = Rep} = State) ->
     terminate_cleanup(State),
-    update_rep_doc(Rep#rep.doc, [{<<"_replication_state">>, <<"completed">>}]),
+    update_rep_doc(Rep#rep.doc, [{<<"_replication_state">>, <<"error">>}]),
     couch_replication_notifier:notify({error, Rep#rep.id, Reason}).
 
 
