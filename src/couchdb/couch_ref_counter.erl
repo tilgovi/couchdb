@@ -13,8 +13,6 @@
 -module(couch_ref_counter).
 -behaviour(gen_server).
 
--include("couch_db.hrl").
-
 -export([start/1, init/1, terminate/2, handle_call/3, handle_cast/2, code_change/3, handle_info/2]).
 -export([drop/1,drop/2,add/1,add/2,count/1]).
 
