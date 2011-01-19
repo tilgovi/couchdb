@@ -77,14 +77,14 @@ terminate(_Reason, #srv{child_procs=ChildProcs}) ->
     ets:match_delete(couch_ref_counter, {{monitor, self(), '$1'}, '$2'}),
     ok.
 
-handle_call(Msg, _From, Srv) ->
+handle_call(Msg, _From, _Srv) ->
     exit({unknown_msg,Msg}).
 
 handle_cast({add, Pid}, Srv) ->
     case ets:lookup(couch_ref_counter, {self(), Pid}) of
     [N] when N > 0 ->
         case ets:lookup(couch_ref_counter, {monitor, self(), Pid}) of
-        [MonRef] ->
+        [_MonRef] ->
             ok;
         _ ->
             ets:insert_new(couch_ref_counter, {{monitor, self(), Pid},
