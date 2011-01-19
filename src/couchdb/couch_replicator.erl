@@ -126,14 +126,14 @@ async_replicate(#rep{id = {BaseId, Ext}, source = Src, target = Tgt} = Rep) ->
             %% the Pid by calling start_child again.
             {error, {already_started, Pid}} =
                 supervisor:start_child(couch_rep_sup, ChildSpec),
-            ?LOG_DEBUG("replication `~s` already running at ~p (`~s` -> `~s`)",
+            ?LOG_INFO("replication `~s` already running at ~p (`~s` -> `~s`)",
                 [RepChildId, Pid, Source, Target]),
             {ok, Pid};
         {error, _} = Error ->
             Error
         end;
     {error, {already_started, Pid}} ->
-        ?LOG_DEBUG("replication `~s` already running at ~p (`~s` -> `~s`)",
+        ?LOG_INFO("replication `~s` already running at ~p (`~s` -> `~s`)",
             [RepChildId, Pid, Source, Target]),
         {ok, Pid};
     {error, {Error, _}} ->
