@@ -19,6 +19,7 @@
 start(ChildProcs) ->
     gen_server:start(couch_ref_counter, {self(), ChildProcs}, []).
 
+
 drop(RefCounterPid) ->
     drop(RefCounterPid, self()).
 
