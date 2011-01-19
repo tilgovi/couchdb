@@ -18,7 +18,7 @@
 
 % meant to be used only by the replicator database listener
 -export([async_replicate/1]).
--export([end_replication/1]).
+-export([cancel_replication/1]).
 
 % gen_server callbacks
 -export([init/1, terminate/2, code_change/3]).
@@ -74,7 +74,7 @@
 replicate(#rep{id = RepId, options = Options} = Rep) ->
     case get_value(cancel, Options, false) of
     true ->
-        end_replication(RepId);
+        cancel_replication(RepId);
     false ->
         {ok, Listener} = rep_result_listener(RepId),
         Result = do_replication_loop(Rep),
@@ -160,7 +160,7 @@ wait_for_result(RepId) ->
     end.
 
 
-end_replication({BaseId, Extension}) ->
+cancel_replication({BaseId, Extension}) ->
     FullRepId = BaseId ++ Extension,
     case supervisor:terminate_child(couch_rep_sup, FullRepId) of
     ok ->
@@ -241,7 +241,7 @@ do_init(#rep{options = Options, id = {BaseId, Ext}} = Rep) ->
     %
     % http://www.erlang.org/cgi-bin/ezmlm-cgi?3:sss:1772:201012:kihiniifeclgnpodlipd#b
     %
-    % The current solution is to delete the child spec (see end_replication/1)
+    % The current solution is to delete the child spec (see cancel_replication/1)
     % and then start the replication again.
 
     ?LOG_INFO("Replication `~p` is using:~n"
@@ -403,7 +403,7 @@ terminate(normal, #rep_state{rep_details = #rep{id = RepId, doc = RepDoc},
     couch_replication_notifier:notify({finished, RepId, CheckpointHistory});
 
 terminate(shutdown, State) ->
-    % cancelled replication throught ?MODULE:end_replication/1
+    % cancelled replication throught ?MODULE:cancel_replication/1
     terminate_cleanup(State);
 
 terminate(Reason, #rep_state{rep_details = Rep} = State) ->

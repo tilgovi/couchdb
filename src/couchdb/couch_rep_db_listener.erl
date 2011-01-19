@@ -302,7 +302,7 @@ replication_complete(DocId) ->
 stop_replication(DocId) ->
     case ets:lookup(?DOC_TO_REP_ID_MAP, DocId) of
     [{DocId, {BaseId, _} = RepId}] ->
-        couch_replicator:end_replication(RepId),
+        couch_replicator:cancel_replication(RepId),
         true = ets:delete(?REP_ID_TO_DOC_ID_MAP, BaseId),
         true = ets:delete(?DOC_TO_REP_ID_MAP, DocId),
         {ok, RepId};
@@ -312,7 +312,7 @@ stop_replication(DocId) ->
 
 stop_all_replications() ->
     ets:foldl(
-        fun({_, RepId}, _) -> couch_replicator:end_replication(RepId) end,
+        fun({_, RepId}, _) -> couch_replicator:cancel_replication(RepId) end,
         ok,
         ?DOC_TO_REP_ID_MAP
     ),
