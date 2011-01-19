@@ -16,7 +16,7 @@
 % public API
 -export([replicate/1]).
 
- % meant to be used only by the replicator database listener
+% meant to be used only by the replicator database listener
 -export([async_replicate/1]).
 -export([end_replication/1]).
 
