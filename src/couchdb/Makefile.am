@@ -40,6 +40,7 @@ source_files = \
     couch_db_update_notifier.erl \
     couch_db_update_notifier_sup.erl \
     couch_doc.erl \
+    couch_drv.erl \
     couch_event_sup.erl \
     couch_external_manager.erl \
     couch_external_server.erl \
@@ -63,6 +64,7 @@ source_files = \
     couch_native_process.erl \
     couch_os_daemons.erl \
     couch_os_process.erl \
+    couch_primary_sup.erl \
     couch_query_servers.erl \
     couch_ref_counter.erl \
     couch_rep_db_listener.erl \
@@ -72,6 +74,7 @@ source_files = \
     couch_replicator_doc_copier.erl \
     couch_replicator_rev_finder.erl \
     couch_replicator_utils.erl \
+    couch_secondary_sup.erl \
     couch_server.erl \
     couch_server_sup.erl \
     couch_stats_aggregator.erl \
@@ -105,6 +108,7 @@ compiled_files = \
     couch_db_update_notifier.beam \
     couch_db_update_notifier_sup.beam \
     couch_doc.beam \
+    couch_drv.beam \
     couch_event_sup.beam \
     couch_external_manager.beam \
     couch_external_server.beam \
@@ -128,6 +132,7 @@ compiled_files = \
     couch_native_process.beam \
     couch_os_daemons.beam \
     couch_os_process.beam \
+    couch_primary_sup.beam \
     couch_query_servers.beam \
     couch_ref_counter.beam \
     couch_rep_db_listener.beam \
@@ -137,6 +142,7 @@ compiled_files = \
     couch_replicator_doc_copier.beam \
     couch_replicator_rev_finder.beam \
     couch_replicator_utils.beam \
+    couch_secondary_sup.beam \
     couch_server.beam \
     couch_server_sup.beam \
     couch_stats_aggregator.beam \
