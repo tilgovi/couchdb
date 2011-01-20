@@ -238,17 +238,10 @@ handle_info({req_timedout, From}, State) ->
     end;
 
 handle_info(timeout, State) ->
-    receive
-        {tcp, _Sock, Data} ->
-            handle_sock_data(Data, State);
-        {ssl, _Sock, Data} ->
-            handle_sock_data(Data, State)
-    after 0 ->
-        do_trace("Inactivity timeout triggered. Shutting down connection~n", []),
-        shutting_down(State),
-        do_error_reply(State, req_timedout),
-        {stop, normal, State}
-    end;
+    do_trace("Inactivity timeout triggered. Shutting down connection~n", []),
+    shutting_down(State),
+    do_error_reply(State, req_timedout),
+    {stop, normal, State};
 
 handle_info({trace, Bool}, State) ->
     put(my_trace_flag, Bool),
