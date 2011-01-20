@@ -17,6 +17,7 @@
 -export([code_change/3, terminate/2]).
 
 -include("couch_db.hrl").
+-include("couch_replicator.hrl").
 
 -define(DOC_TO_REP_ID_MAP, rep_doc_id_to_rep_id).
 -define(REP_ID_TO_DOC_ID_MAP, rep_id_to_rep_doc_id).

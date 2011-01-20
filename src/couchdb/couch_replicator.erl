@@ -26,6 +26,7 @@
 
 -include("couch_db.hrl").
 -include("couch_api_wrap.hrl").
+-include("couch_replicator.hrl").
 
 -import(couch_util, [
     get_value/2,

@@ -20,6 +20,7 @@
 
 -include("couch_db.hrl").
 -include("couch_api_wrap.hrl").
+-include("couch_replicator.hrl").
 -include("couch_js_functions.hrl").
 -include("../ibrowse/ibrowse.hrl").
 

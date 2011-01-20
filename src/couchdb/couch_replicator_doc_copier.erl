@@ -22,6 +22,7 @@
 
 -include("couch_db.hrl").
 -include("couch_api_wrap.hrl").
+-include("couch_replicator.hrl").
 
 % TODO: maybe make both buffer max sizes configurable
 -define(DOC_BUFFER_BYTE_SIZE, 512 * 1024).   % for remote targets
