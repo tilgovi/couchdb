@@ -238,12 +238,14 @@ do_init(#rep{options = Options, id = {BaseId, Ext}} = Rep) ->
     % (#rep{} record) specified in the MFA component of the supervisor
     % child spec will always be used whenever the child is restarted.
     % This implies the same replication performance tunning parameters will
-    % always be used. See the following thread for details:
+    % always be used. See the following threads for details:
     %
     % http://www.erlang.org/cgi-bin/ezmlm-cgi?3:sss:1772:201012:kihiniifeclgnpodlipd#b
+    % http://erlang.2086793.n4.nabble.com/PATCH-supervisor-atomically-delete-child-spec-when-child-terminates-td3226098.html
     %
     % The current solution is to delete the child spec (see cancel_replication/1)
-    % and then start the replication again.
+    % and then start the replication again, but this is unfortunately not immune
+    % to race conditions.
 
     ?LOG_INFO("Replication `~p` is using:~n"
         "~c~p worker processes~n"
