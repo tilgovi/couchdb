@@ -110,6 +110,12 @@ async_replicate(#rep{id = {BaseId, Ext}, source = Src, target = Tgt} = Rep) ->
         worker,
         [?MODULE]
     },
+    % All these nested cases to attempt starting/restarting a replication child
+    % are ugly and not 100% race condition free. The following patch submission
+    % is a solution:
+    %
+    % http://erlang.2086793.n4.nabble.com/PATCH-supervisor-atomically-delete-child-spec-when-child-terminates-td3226098.html
+    %
     case supervisor:start_child(couch_rep_sup, ChildSpec) of
     {ok, Pid} ->
         ?LOG_INFO("starting new replication `~s` at ~p (`~s` -> `~s`)",
