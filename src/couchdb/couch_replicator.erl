@@ -382,13 +382,19 @@ handle_cast({report_seq, Seq},
 handle_cast({report_seq_done, Seq, StatsInc},
     #rep_state{seqs_in_progress = SeqsInProgress, highest_seq_done = HighestDone,
         current_through_seq = ThroughSeq, stats = Stats} = State) ->
-    {NewThroughSeq, NewSeqsInProgress} = case SeqsInProgress of
+    {NewThroughSeq0, NewSeqsInProgress} = case SeqsInProgress of
     [Seq | Rest] ->
         {Seq, Rest};
     [_ | _] ->
         {ThroughSeq, ordsets:del_element(Seq, SeqsInProgress)}
     end,
     NewHighestDone = lists:max([HighestDone, Seq]),
+    NewThroughSeq = case NewSeqsInProgress of
+    [] ->
+        lists:max([NewThroughSeq0, NewHighestDone]);
+    _ ->
+        NewThroughSeq0
+    end,
     ?LOG_DEBUG("Worker reported seq ~p, through seq was ~p, "
         "new through seq is ~p, highest seq done was ~p, "
         "new highest seq done is ~p~n"
