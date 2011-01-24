@@ -263,6 +263,9 @@ do_init(#rep{options = Options, id = {BaseId, Ext}} = Rep) ->
             HttpPipeSize, $\t, get_value(connection_timeout, Options),
             $\t, io_lib:format("~p", [get_value(socket_options, Options)])]),
 
+    ?LOG_DEBUG("Missing rev finder pids are: ~p", [MissingRevFinders]),
+    ?LOG_DEBUG("Worker pids are: ~p", [Workers]),
+
     {ok, State#rep_state{
             missing_revs_queue = MissingRevsQueue,
             changes_queue = ChangesQueue,
@@ -385,11 +388,18 @@ handle_cast({report_seq_done, Seq, StatsInc},
     [_ | _] ->
         {ThroughSeq, ordsets:del_element(Seq, SeqsInProgress)}
     end,
+    NewHighestDone = lists:max([HighestDone, Seq]),
+    ?LOG_DEBUG("Worker reported seq ~p, through seq was ~p, "
+        "new through seq is ~p, highest seq done was ~p, "
+        "new highest seq done is ~p~n"
+        "Seqs in progress were: ~p~nSeqs in progress are now: ~p",
+        [Seq, ThroughSeq, NewThroughSeq, HighestDone,
+            NewHighestDone, SeqsInProgress, NewSeqsInProgress]),
     NewState = State#rep_state{
         stats = sum_stats([Stats, StatsInc]),
         current_through_seq = NewThroughSeq,
         seqs_in_progress = NewSeqsInProgress,
-        highest_seq_done = lists:max([HighestDone, Seq])
+        highest_seq_done = NewHighestDone
     },
     {noreply, NewState};
 
