@@ -83,12 +83,11 @@ AC_ARG_WITH([js-lib], [AC_HELP_STRING([--with-js-lib=PATH],
     JS_LIB_DIR=$withval
     JS_LIBS="-L$withval"
 ], [])
-AC_SUBST(JS_LIB_DIR)
 
 AC_ARG_VAR([ERLC_FLAGS], [general flags to prepend to ERLC_FLAGS])
 AC_ARG_VAR([FLAGS], [general flags to prepend to LDFLAGS and CPPFLAGS])
 
-LIB_FLAGS="$JS_LIBS -L/usr/local/lib -L/opt/local/lib"
+LIB_FLAGS="-L/usr/local/lib -L/opt/local/lib"
 LIBS="$LIB_FLAGS $LIBS"
 
 case "$(uname -s)" in
@@ -113,6 +112,8 @@ esac
 
 AM_CONDITIONAL([WINDOWS], [test x$IS_WINDOWS = xTRUE])
 
+OLD_LIBS="$LIBS"
+LIBS="$JS_LIBS $LIBS"
 AC_CHECK_LIB([mozjs], [JS_NewContext], [JS_LIB_BASE=mozjs], [
     AC_CHECK_LIB([js], [JS_NewContext], [JS_LIB_BASE=js], [
         AC_CHECK_LIB([js3250], [JS_NewContext], [JS_LIB_BASE=js3250], [
@@ -120,6 +121,7 @@ AC_CHECK_LIB([mozjs], [JS_NewContext], [JS_LIB_BASE=mozjs], [
                 AC_MSG_ERROR([Could not find the js library.
 
 Is the Mozilla SpiderMonkey library installed?])])])])])
+LIBS="$OLD_LIBS"
 
 
 if test x${IS_WINDOWS} = xTRUE; then
