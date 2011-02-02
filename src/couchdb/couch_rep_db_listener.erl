@@ -80,7 +80,7 @@ handle_call({restart_failure, {Props} = RepDoc, Error}, _From, State) ->
     ?LOG_ERROR("Failed to start replication `~s` after ~p attempts using "
         "the document `~s`. Last error reason was: ~p",
         [pp_rep_id(RepId), ?MAX_RETRIES, DocId, Error]),
-    couch_rep:update_rep_doc(
+    update_rep_doc(
         RepDoc,
         [{<<"_replication_state">>, <<"error">>},
             {<<"_replication_id">>, ?l2b(BaseId)}]),
@@ -153,7 +153,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 changes_feed_loop() ->
-    {ok, RepDb} = couch_rep:ensure_rep_db_exists(),
+    {ok, RepDb} = couch_replicator_utils:ensure_rep_db_exists(),
     Server = self(),
     Pid = spawn_link(
         fun() ->
@@ -350,7 +350,7 @@ replication_complete(DocId) ->
 stop_replication(DocId) ->
     case ets:lookup(?DOC_ID_TO_REP_ID, DocId) of
     [{DocId, {BaseId, _} = RepId}] ->
-        couch_rep:end_replication(RepId),
+        couch_replicator:cancel_replication(RepId),
         true = ets:delete(?REP_ID_TO_DOC_ID, BaseId),
         true = ets:delete(?DOC_ID_TO_REP_ID, DocId),
         {ok, RepId};
