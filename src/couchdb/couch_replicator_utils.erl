@@ -239,7 +239,7 @@ make_options(Props) ->
     DefTimeout = couch_config:get("replicator", "connection_timeout", "30000"),
     {ok, DefSocketOptions} = couch_util:parse_term(
         couch_config:get("replicator", "socket_options",
-            "[{reuseaddr, true}, {keepalive, true}, {nodelay, false}]")),
+            "[{keepalive, true}, {nodelay, false}]")),
     lists:ukeymerge(1, Options, [
         {connection_timeout, list_to_integer(DefTimeout)},
         {http_connections, list_to_integer(DefConns)},
