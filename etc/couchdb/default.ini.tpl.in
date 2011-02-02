@@ -136,6 +136,7 @@ compressible_types = text/*, application/javascript, application/json, applicati
 
 [replicator]
 db = _replicator
+max_replication_retry_count = 10
 ; More worker processes can give higher network throughput but can also
 ; imply more disk and network IO.
 worker_processes = 4
