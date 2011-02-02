@@ -197,6 +197,8 @@ do_init(#rep{options = Options, id = {BaseId, Ext}} = Rep) ->
     #rep_state{
         source = Source,
         target = Target,
+        source_name = SourceName,
+        target_name = TargetName,
         start_seq = StartSeq
     } = State = init_state(Rep),
 
@@ -239,6 +241,11 @@ do_init(#rep{options = Options, id = {BaseId, Ext}} = Rep) ->
         lists:seq(1, CopiersCount)),
 
     maybe_set_triggered(Rep),
+
+    couch_task_status:add_task(
+        "Replication",
+         io_lib:format("`~s`: `~s` -> `~s`",
+            [BaseId ++ Ext, SourceName, TargetName]), "Starting"),
 
     % Restarting a supervised child implies that the original arguments
     % (#rep{} record) specified in the MFA component of the supervisor
@@ -401,6 +408,12 @@ handle_cast({report_seq_done, Seq, StatsInc},
         "Seqs in progress were: ~p~nSeqs in progress are now: ~p",
         [Seq, ThroughSeq, NewThroughSeq, HighestDone,
             NewHighestDone, SeqsInProgress, NewSeqsInProgress]),
+    case NewThroughSeq of
+    ThroughSeq ->
+        ok;
+    _ ->
+        couch_task_status:update("Processed source seq ~p", [NewThroughSeq])
+    end,
     NewState = State#rep_state{
         stats = sum_stats([Stats, StatsInc]),
         current_through_seq = NewThroughSeq,
@@ -438,6 +451,7 @@ terminate(Reason, #rep_state{rep_details = Rep} = State) ->
 
 
 terminate_cleanup(State) ->
+    couch_task_status:update("Finishing"),
     stop_db_compaction_notifier(State#rep_state.source_db_compaction_notifier),
     stop_db_compaction_notifier(State#rep_state.target_db_compaction_notifier),
     couch_api_wrap:db_close(State#rep_state.source),
