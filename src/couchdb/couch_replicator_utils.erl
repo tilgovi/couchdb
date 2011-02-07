@@ -166,12 +166,11 @@ maybe_append_options(Options, RepOptions) ->
 
 
 get_rep_endpoint(_UserCtx, #httpdb{url=Url, headers=Headers, oauth=OAuth}) ->
-    DefaultHeaders = (#httpdb{})#httpdb.headers,
     case OAuth of
     nil ->
-        {remote, Url, Headers -- DefaultHeaders};
+        {remote, Url, Headers};
     #oauth{} ->
-        {remote, Url, Headers -- DefaultHeaders, OAuth}
+        {remote, Url, Headers, OAuth}
     end;
 get_rep_endpoint(UserCtx, <<DbName/binary>>) ->
     {local, DbName, UserCtx}.
@@ -182,7 +181,6 @@ parse_rep_db({Props}, ProxyParams, Options) ->
     {AuthProps} = get_value(<<"auth">>, Props, {[]}),
     {BinHeaders} = get_value(<<"headers">>, Props, {[]}),
     Headers = lists:ukeysort(1, [{?b2l(K), ?b2l(V)} || {K, V} <- BinHeaders]),
-    DefaultHeaders = (#httpdb{})#httpdb.headers,
     OAuth = case get_value(<<"oauth">>, AuthProps) of
     undefined ->
         nil;
@@ -204,7 +202,7 @@ parse_rep_db({Props}, ProxyParams, Options) ->
     #httpdb{
         url = Url,
         oauth = OAuth,
-        headers = lists:ukeymerge(1, Headers, DefaultHeaders),
+        headers = Headers,
         ibrowse_options = lists:keysort(1,
             [{socket_options, get_value(socket_options, Options)} |
                 ProxyParams ++ ssl_params(Url)]),

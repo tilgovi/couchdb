@@ -120,8 +120,7 @@ get_db_info(Db) ->
 ensure_full_commit(#httpdb{} = Db) ->
     send_req(
         Db,
-        [{method, post}, {path, "_ensure_full_commit"}, {direct, true},
-            {headers, [{"Content-Type", "application/json"}]}],
+        [{method, post}, {path, "_ensure_full_commit"}, {direct, true}],
         fun(201, _, {Props}) ->
             {ok, get_value(<<"instance_start_time">>, Props)}
         end);
@@ -270,9 +269,7 @@ update_docs(#httpdb{} = HttpDb, DocList, Options, UpdateType) ->
         [{method, post}, {path, "_bulk_docs"},
             {body, {BodyFun, [Prefix1 | DocList]}},
             {ibrowse_options, [{transfer_encoding, chunked}]},
-            {headers, [
-                {"X-Couch-Full-Commit", FullCommit},
-                {"Content-Type", "application/json"} ]}],
+            {headers, [{"X-Couch-Full-Commit", FullCommit}]}],
         fun(201, _, Results) when is_list(Results) ->
                 {ok, bulk_results_to_errors(DocList, Results, remote)};
            (417, _, Results) when is_list(Results) ->
@@ -283,24 +280,22 @@ update_docs(Db, DocList, Options, UpdateType) ->
     {ok, bulk_results_to_errors(DocList, Result, UpdateType)}.
 
 
-changes_since(#httpdb{headers = Headers1} = HttpDb, Style, StartSeq,
+changes_since(#httpdb{} = HttpDb, Style, StartSeq,
     UserFun, Options) ->
     BaseQArgs = [
         {"style", atom_to_list(Style)}, {"since", couch_util:to_list(StartSeq)}
     ],
-    {QArgs, Method, Body, Headers} = case get_value(doc_ids, Options) of
+    {QArgs, Method, Body} = case get_value(doc_ids, Options) of
     undefined ->
         QArgs1 = maybe_add_changes_filter_q_args(BaseQArgs, Options),
-        {QArgs1, get, [], Headers1};
+        {QArgs1, get, []};
     DocIds ->
-        Headers2 = [{"Content-Type", "application/json"} | Headers1],
         JsonDocIds = ?JSON_ENCODE({[{<<"doc_ids">>, DocIds}]}),
-        {[{"filter", "_doc_ids"} | BaseQArgs], post, JsonDocIds, Headers2}
+        {[{"filter", "_doc_ids"} | BaseQArgs], post, JsonDocIds}
     end,
     send_req(
         HttpDb,
-        [{method, Method}, {path, "_changes"}, {qs, QArgs},
-            {headers, Headers}, {body, Body},
+        [{method, Method}, {path, "_changes"}, {qs, QArgs}, {body, Body},
             {ibrowse_options, [{stream_to, {self(), once}}]}],
         fun(200, _, DataStreamFun) ->
             case couch_util:get_value(continuous, Options, false) of

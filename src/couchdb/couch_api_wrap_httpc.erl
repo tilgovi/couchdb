@@ -52,8 +52,10 @@ send_req(HttpDb, Params1, Callback) ->
 
 send_ibrowse_req(#httpdb{headers = BaseHeaders} = HttpDb, Params) ->
     Method = get_value(method, Params, get),
+    DefaultHeaders = (#httpdb{})#httpdb.headers,
+    Headers0 = lists:ukeymerge(1, BaseHeaders, DefaultHeaders),
     UserHeaders = lists:keysort(1, get_value(headers, Params, [])),
-    Headers1 = lists:ukeymerge(1, UserHeaders, BaseHeaders),
+    Headers1 = lists:ukeymerge(1, UserHeaders, Headers0),
     Headers2 = oauth_header(HttpDb, Params) ++ Headers1,
     Url = full_url(HttpDb, Params),
     Body = get_value(body, Params, []),
