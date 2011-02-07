@@ -166,11 +166,12 @@ maybe_append_options(Options, RepOptions) ->
 
 
 get_rep_endpoint(_UserCtx, #httpdb{url=Url, headers=Headers, oauth=OAuth}) ->
+    DefaultHeaders = (#httpdb{})#httpdb.headers,
     case OAuth of
     nil ->
-        {remote, Url, Headers};
+        {remote, Url, Headers -- DefaultHeaders};
     #oauth{} ->
-        {remote, Url, Headers, OAuth}
+        {remote, Url, Headers -- DefaultHeaders, OAuth}
     end;
 get_rep_endpoint(UserCtx, <<DbName/binary>>) ->
     {local, DbName, UserCtx}.
