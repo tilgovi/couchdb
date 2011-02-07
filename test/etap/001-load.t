@@ -17,7 +17,7 @@
 
 main(_) ->
     test_util:init_code_path(),
-    etap:plan(37),
+    etap:plan(40),
     Modules = [
         couch_btree,
         couch_config,
