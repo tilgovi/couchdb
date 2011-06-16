@@ -187,7 +187,6 @@ AC_CHECK_LIB([mozjs185], [JS_NewContext], [JS_LIB_BASE=mozjs185], [
                     AC_MSG_ERROR([Could not find the js library.
 
 Is the Mozilla SpiderMonkey library installed?])])])])])])
-LIBS="$OLD_LIBS"
 
 AC_CHECK_LIB([$JS_LIB_BASE], [JS_FreezeObject],
     AC_DEFINE([HAVE_JS_FREEZE_OBJECT], [1],
@@ -210,8 +209,9 @@ AC_CHECK_LIB([$JS_LIB_BASE], [JS_StrictPropertyStub],
         [Define whether we have JS_StrictPropertyStub]))
 
 AC_CHECK_LIB([$JS_LIB_BASE], [JS_DestroyScript],
-    AC_DEFINE([HAVE_SCRIPT_AS_OBJECT], [1],
-        [Define whether scripts are JSObjects]))
+    AC_DEFINE([HAVE_SCRIPT_TYPE], [1],
+        [Define whether scripts have a special JSScript type]))
+LIBS="$OLD_LIBS"
 
 if test x${IS_WINDOWS} = xTRUE; then
     if test -f "$JS_LIB_DIR/$JS_LIB_BASE.dll"; then

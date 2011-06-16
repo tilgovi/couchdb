@@ -53,13 +53,13 @@
 # define JS_SETPROPERTY_PROPERTY_STUB JS_PropertyStub
 #endif
 
-#ifdef HAVE_SCRIPT_AS_OBJECT
-# define COUCHJS_SCRIPT JSObject
-# define COUCHJS_DESTROY_SCRIPT(cx, script)
-#else
+#ifdef HAVE_SCRIPT_TYPE
 # define COUCHJS_SCRIPT JSScript
 # define COUCHJS_DESTROY_SCRIPT(cx, script) \
     JS_DestroyScript(cx, script)
+#else
+# define COUCHJS_SCRIPT JSObject
+# define COUCHJS_DESTROY_SCRIPT(cx, script)
 #endif
 
 #ifdef HAVE_JS_FREEZE_OBJECT
