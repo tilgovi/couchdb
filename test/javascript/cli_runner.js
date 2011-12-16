@@ -19,7 +19,8 @@ var console = {
 
 function T(arg1, arg2) {
   if(!arg1) {
-    throw((arg2 ? arg2 : arg1).toString());
+    var result = (arg2 ? arg2 : arg1);
+    throw((result instanceof Error ? result : Error(result)));
   }
 }
 
@@ -28,9 +29,9 @@ function runTestConsole(num, name, func) {
     func();
     print("ok " + num + " " + name);
   } catch(e) {
-    msg = e.toString();
-    msg = msg.replace(/\n/g, "\n    ");
-    print("not ok " + num + " " + name + " " + msg);
+    print("not ok " + num + " " + name);
+    print(e.toString());
+    print("Stacktrace:\n" + e.stack.replace(/^/gm, "\t"));
   }
 }
 
@@ -45,9 +46,5 @@ function runAllTestsConsole() {
   }
 };
 
-try {
-  waitForSuccess(CouchDB.getVersion);
-  runAllTestsConsole();
-} catch (e) {
-  p("# " + e.toString());
-}
+waitForSuccess(CouchDB.getVersion);
+runAllTestsConsole();
