@@ -329,6 +329,10 @@ main(int argc, const char* argv[])
 
     JS_SetErrorReporter(cx, couch_error);
     JS_ToggleOptions(cx, JSOPTION_XML);
+    JS_SetOptions(cx, JS_GetOptions(cx)
+        | JSOPTION_JIT
+        | JSOPTION_METHODJIT
+        | JSOPTION_PROFILING);
     
     SETUP_REQUEST(cx);
 
