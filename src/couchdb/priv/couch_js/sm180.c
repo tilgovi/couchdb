@@ -116,6 +116,14 @@ req_status(JSContext* cx, JSObject* obj, jsval idval, jsval* vp)
 
 
 static JSBool
+req_uri(JSContext *cx, JSObject* obj, jsid pid, jsval* vp)
+{
+    couch_args *args = (couch_args*)JS_GetContextPrivate(cx);
+    return http_uri(cx, obj, args, &JS_RVAL(cx, vp));
+}
+
+
+static JSBool
 evalcx(JSContext *cx, uintN argc, jsval* vp)
 {
     jsval* argv = JS_ARGV(cx, vp);
@@ -259,6 +267,7 @@ JSClass CouchHTTPClass = {
 
 JSPropertySpec CouchHTTPProperties[] = {
     {"status", 0, JSPROP_READONLY, req_status, NULL},
+    {"base_url", 0, JSPROP_READONLY | JSPROP_SHARED, req_uri, NULL},
     {0, 0, 0, 0, 0}
 };
 
@@ -324,6 +333,7 @@ main(int argc, const char* argv[])
 
     JS_SetErrorReporter(cx, couch_error);
     JS_ToggleOptions(cx, JSOPTION_XML);
+    JS_SetContextPrivate(cx, args);
     
     SETUP_REQUEST(cx);
 
