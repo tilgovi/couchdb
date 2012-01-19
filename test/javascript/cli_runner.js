@@ -30,7 +30,7 @@ function runTestConsole(num, name, func) {
     print("ok " + num + " " + name);
   } catch(e) {
     print("not ok " + num + " " + name);
-    print(e.toString());
+    print(e.toString(), true);
     if (e.stack) {
       print("Stacktrace:\n" + e.stack.replace(/^/gm, "\t"), true);
     }
